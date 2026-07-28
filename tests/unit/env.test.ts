@@ -62,3 +62,37 @@ describe('server environment validation', () => {
     expect(parseServerEnv({ ...base, RATE_LIMIT_ENABLED: '1' }).RATE_LIMIT_ENABLED).toBe(true);
   });
 });
+
+describe('resilience to bad optional configuration', () => {
+  it('treats a placeholder ORS key as not configured instead of throwing', () => {
+    const env = parseServerEnv({
+      ...base,
+      APP_DATA_MODE: 'live',
+      ROUTING_PROVIDER: 'openrouteservice',
+      ORS_API_KEY: '..',
+    });
+    expect(env.ORS_API_KEY).toBeUndefined();
+    expect(env.ROUTING_PROVIDER).toBe('fixture');
+  });
+
+  it('ignores an empty or whitespace-only key', () => {
+    expect(parseServerEnv({ ...base, ORS_API_KEY: '   ' }).ORS_API_KEY).toBeUndefined();
+  });
+
+  it('ignores a malformed DATABASE_URL rather than failing to boot', () => {
+    const env = parseServerEnv({ ...base, APP_DATA_MODE: 'live', DATABASE_URL: 'not-a-url' });
+    expect(env.DATABASE_URL).toBeUndefined();
+  });
+
+  it('still accepts a real key and a real database URL', () => {
+    const env = parseServerEnv({
+      ...base,
+      APP_DATA_MODE: 'live',
+      ROUTING_PROVIDER: 'openrouteservice',
+      ORS_API_KEY: 'k'.repeat(32),
+      DATABASE_URL: 'postgresql://user:pass@localhost:5432/trailloop',
+    });
+    expect(env.ROUTING_PROVIDER).toBe('openrouteservice');
+    expect(env.DATABASE_URL).toContain('postgresql://');
+  });
+});

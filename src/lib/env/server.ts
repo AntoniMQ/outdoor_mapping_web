@@ -10,14 +10,41 @@ const booleanish = z
     typeof value === 'boolean' ? value : ['1', 'true', 'yes', 'on'].includes(value.toLowerCase()),
   );
 
+/**
+ * Optional configuration must never take the whole site down. Blank values,
+ * placeholders and malformed URLs are treated as "not configured" — the
+ * provider then downgrades to its fixture adapter, which is visible in the UI
+ * and on /api/health, rather than throwing at startup.
+ */
+const optionalSecret = (minimumLength: number) =>
+  z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => (value && value.length >= minimumLength ? value : undefined));
+
+const optionalUrl = z
+  .string()
+  .trim()
+  .optional()
+  .transform((value) => {
+    if (!value) return undefined;
+    try {
+      new URL(value);
+      return value;
+    } catch {
+      return undefined;
+    }
+  });
+
 const serverSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   APP_DATA_MODE: z.enum(['live', 'fixture']).default('fixture'),
 
-  DATABASE_URL: z.string().url().optional(),
+  DATABASE_URL: optionalUrl,
 
   ROUTING_PROVIDER: z.enum(['openrouteservice', 'fixture']).default('fixture'),
-  ORS_API_KEY: z.string().min(10).optional(),
+  ORS_API_KEY: optionalSecret(10),
   ORS_BASE_URL: z.string().url().default('https://api.openrouteservice.org'),
 
   RIGHTS_OF_WAY_PROVIDER: z.enum(['overpass', 'postgis', 'fixture']).default('fixture'),
@@ -68,9 +95,16 @@ function applyModeConstraints(env: ServerEnv): ServerEnv {
   }
   const next = { ...env };
   if (next.ROUTING_PROVIDER === 'openrouteservice' && !next.ORS_API_KEY) {
+    // Selected but unusable: fall back rather than fail, and say why.
+    console.warn(
+      '[trailloop] ROUTING_PROVIDER=openrouteservice but ORS_API_KEY is missing or too short. Falling back to fixture routing.',
+    );
     next.ROUTING_PROVIDER = 'fixture';
   }
   if (next.RIGHTS_OF_WAY_PROVIDER === 'postgis' && !next.DATABASE_URL) {
+    console.warn(
+      '[trailloop] RIGHTS_OF_WAY_PROVIDER=postgis but DATABASE_URL is missing or malformed. Falling back to fixture path data.',
+    );
     next.RIGHTS_OF_WAY_PROVIDER = 'fixture';
   }
   return next;
