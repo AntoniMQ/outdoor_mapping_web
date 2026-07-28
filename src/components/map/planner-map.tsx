@@ -64,6 +64,7 @@ export function PlannerMap(props: PlannerMapProps) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [basemapNotice, setBasemapNotice] = useState<string | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
 
   useEffect(() => {
     propsRef.current = props;
@@ -143,8 +144,12 @@ export function PlannerMap(props: PlannerMapProps) {
           if (!cancelled && map!.isStyleLoaded()) finishInit(map!);
         });
         map.on('error', (event) => {
-          // Style/tile failures must not break the planner.
-          console.warn('Map error', event.error?.message);
+          // Style/tile failures must not break the planner, but the first one is
+          // surfaced on screen: it is the single most useful diagnostic when a
+          // basemap will not render.
+          const message = event.error?.message;
+          console.warn('Map error', message);
+          if (message) setMapError((previous) => previous ?? message);
         });
         map.on('moveend', () => emitViewport(map!));
 
@@ -365,13 +370,21 @@ export function PlannerMap(props: PlannerMapProps) {
         </div>
       ) : null}
       {basemapNotice ? (
-        <p
+        <div
           role="status"
           data-testid="basemap-notice"
-          className="pointer-events-none absolute inset-x-2 bottom-10 mx-auto max-w-md rounded-md border border-amber-300 bg-amber-100/95 px-2 py-1 text-center text-xs text-amber-950 dark:border-amber-700 dark:bg-amber-950/95 dark:text-amber-100"
+          className="pointer-events-none absolute inset-x-2 bottom-10 mx-auto max-w-lg rounded-md border border-amber-300 bg-amber-100/95 px-2 py-1.5 text-center text-xs text-amber-950 dark:border-amber-700 dark:bg-amber-950/95 dark:text-amber-100"
         >
-          {basemapNotice}
-        </p>
+          <p>{basemapNotice}</p>
+          <p className="mt-1 font-mono break-all opacity-80">
+            style: {clientEnv.NEXT_PUBLIC_MAP_STYLE_URL}
+          </p>
+          {mapError ? (
+            <p className="mt-0.5 font-mono break-all opacity-80" data-testid="basemap-error">
+              error: {mapError}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {failed ? (
         <div

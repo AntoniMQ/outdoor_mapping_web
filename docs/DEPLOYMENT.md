@@ -59,6 +59,13 @@ your orchestrator’s liveness probe at it.
 - Serve the rights-of-way overlay from vector tiles rather than GeoJSON once coverage extends beyond a city.
 - Logs are structured JSON with request identifiers and redacted secrets; ship them somewhere searchable.
 
+## MapLibre version pin
+
+`maplibre-gl` is pinned to the 5.x line. MapLibre 6 moved the tile-parsing web worker from an inline blob into a
+separate module file; when that chunk is not served correctly by the bundler the style still loads (so map attribution
+appears) but no tiles are ever parsed, the `load` event never fires and the canvas stays blank. Before moving to 6.x,
+verify in a real browser that vector tiles render and that `map.on('load')` fires.
+
 ## Docker
 
 `docker-compose.yml` provides PostgreSQL 16 + PostGIS 3.4 for local development, plus an optional `web` profile. It is
