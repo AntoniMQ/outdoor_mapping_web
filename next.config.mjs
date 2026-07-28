@@ -1,11 +1,22 @@
 /** @type {import('next').NextConfig} */
 const isDev = process.env.NODE_ENV !== 'production';
 
-const mapStyleOrigin = (() => {
+/**
+ * Tile providers frequently serve the style from one host and the tiles,
+ * sprites and glyphs from sibling subdomains, so allow both the exact origin
+ * and a wildcard for its registrable domain.
+ */
+const mapStyleSources = (() => {
+  const fallback = ['https://tiles.openfreemap.org', 'https://*.openfreemap.org'];
+  const configured = process.env.NEXT_PUBLIC_MAP_STYLE_URL;
+  if (!configured || configured === 'offline') return fallback;
   try {
-    return new URL(process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? 'https://tiles.openfreemap.org').origin;
+    const url = new URL(configured);
+    const labels = url.hostname.split('.');
+    const wildcard = labels.length > 2 ? `${url.protocol}//*.${labels.slice(-2).join('.')}` : null;
+    return [url.origin, ...(wildcard ? [wildcard] : [])];
   } catch {
-    return 'https://tiles.openfreemap.org';
+    return fallback;
   }
 })();
 
@@ -17,7 +28,7 @@ const csp = [
   "font-src 'self' data:",
   "worker-src 'self' blob:",
   "child-src 'self' blob:",
-  `connect-src 'self' blob: data: ${mapStyleOrigin} https://*.openfreemap.org https://demotiles.maplibre.org`,
+  `connect-src 'self' blob: data: ${mapStyleSources.join(' ')} https://demotiles.maplibre.org`,
   "object-src 'none'",
   "base-uri 'self'",
   "frame-ancestors 'none'",

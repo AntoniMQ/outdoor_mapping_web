@@ -59,8 +59,11 @@ export function PlannerMap(props: PlannerMapProps) {
   });
   const propsRef = useRef(props);
 
+  const installedRef = useRef(false);
+
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  const [basemapNotice, setBasemapNotice] = useState<string | null>(null);
 
   useEffect(() => {
     propsRef.current = props;
@@ -77,10 +80,32 @@ export function PlannerMap(props: PlannerMapProps) {
     propsRef.current.onViewportChange?.(bbox, map.getZoom());
   }, []);
 
+  /**
+   * Installs sources and layers exactly once. Called by whichever signal
+   * arrives first — 'load', 'styledata', or the fallback timer — so a slow or
+   * unreachable basemap can never leave the planner stuck on "Loading map".
+   */
+  const finishInit = useCallback(
+    (map: MapLibreMap) => {
+      if (installedRef.current) return;
+      installedRef.current = true;
+      try {
+        installLayers(map);
+      } catch (error) {
+        console.warn('Map layer setup failed', error);
+      }
+      setReady(true);
+      emitViewport(map);
+    },
+    [emitViewport],
+  );
+
   /* ---------------------------------------------------------------- setup */
   useEffect(() => {
     let cancelled = false;
     let map: MapLibreMap | null = null;
+    let styleTimer: ReturnType<typeof setTimeout> | undefined;
+    let hardTimer: ReturnType<typeof setTimeout> | undefined;
     const markers = markersRef.current;
 
     // MapLibre is loaded dynamically: it cannot run during server rendering.
@@ -111,16 +136,35 @@ export function PlannerMap(props: PlannerMapProps) {
         );
 
         map.on('load', () => {
-          if (cancelled) return;
-          installLayers(map!);
-          setReady(true);
-          emitViewport(map!);
+          if (!cancelled) finishInit(map!);
+        });
+        // 'styledata' also covers styles that finish loading without a 'load' event.
+        map.on('styledata', () => {
+          if (!cancelled && map!.isStyleLoaded()) finishInit(map!);
         });
         map.on('error', (event) => {
           // Style/tile failures must not break the planner.
           console.warn('Map error', event.error?.message);
         });
         map.on('moveend', () => emitViewport(map!));
+
+        // If the basemap has not arrived, fall back to a blank local style so
+        // the overlay, route lines and editing all keep working offline.
+        styleTimer = setTimeout(() => {
+          if (cancelled || installedRef.current) return;
+          setBasemapNotice(
+            'The basemap could not be loaded, so the map is showing a blank background. Route planning, the rights-of-way overlay and GPX export all still work.',
+          );
+          try {
+            map!.setStyle(OFFLINE_STYLE);
+          } catch (error) {
+            console.warn('Falling back to the offline style failed', error);
+          }
+        }, 8_000);
+
+        hardTimer = setTimeout(() => {
+          if (!cancelled) finishInit(map!);
+        }, 12_000);
       })
       .catch((error: unknown) => {
         if (!cancelled) setFailed(error instanceof Error ? error.message : 'Map failed to load');
@@ -128,12 +172,14 @@ export function PlannerMap(props: PlannerMapProps) {
 
     return () => {
       cancelled = true;
+      clearTimeout(styleTimer);
+      clearTimeout(hardTimer);
       markers.forEach((marker) => marker.remove());
       markers.clear();
       map?.remove();
       mapRef.current = null;
     };
-  }, [emitViewport]);
+  }, [emitViewport, finishInit]);
 
   /* ------------------------------------------------------------- handlers */
   useEffect(() => {
@@ -317,6 +363,15 @@ export function PlannerMap(props: PlannerMapProps) {
         >
           Loading map…
         </div>
+      ) : null}
+      {basemapNotice ? (
+        <p
+          role="status"
+          data-testid="basemap-notice"
+          className="pointer-events-none absolute inset-x-2 bottom-10 mx-auto max-w-md rounded-md border border-amber-300 bg-amber-100/95 px-2 py-1 text-center text-xs text-amber-950 dark:border-amber-700 dark:bg-amber-950/95 dark:text-amber-100"
+        >
+          {basemapNotice}
+        </p>
       ) : null}
       {failed ? (
         <div
