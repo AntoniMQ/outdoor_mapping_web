@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: trailloop-db
+    environment:
+      POSTGRES_USER: trailloop
+      POSTGRES_PASSWORD: trailloop
+      POSTGRES_DB: trailloop
+    ports:
+      - '5432:5432'
+    volumes:
+      - trailloop-db:/var/lib/postgresql/data
+      - ./drizzle:/docker-entrypoint-initdb.d/migrations:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U trailloop -d trailloop']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    image: node:22-alpine
+    container_name: trailloop-web
+    working_dir: /app
+    profiles: ['web']
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm dev --hostname 0.0.0.0"
+    environment:
+      APP_DATA_MODE: ${APP_DATA_MODE:-fixture}
+      DATABASE_URL: postgresql://trailloop:trailloop@db:5432/trailloop
+      NEXT_PUBLIC_MAP_STYLE_URL: ${NEXT_PUBLIC_MAP_STYLE_URL:-https://tiles.openfreemap.org/styles/liberty}
+    ports:
+      - '3000:3000'
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  trailloop-db:
