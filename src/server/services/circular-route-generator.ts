@@ -401,6 +401,7 @@ function unanalysedResult(
     ascentMetres: route.ascentMetres ?? 0,
     descentMetres: route.descentMetres ?? 0,
     hasElevationData: route.ascentMetres !== undefined,
+    analysed: false,
     surface: zeroed,
     designation: {
       publicFootpathPercent: 0,

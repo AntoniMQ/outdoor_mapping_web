@@ -254,6 +254,12 @@ export interface RouteAnalysis {
   descentMetres: number;
   /** False when no elevation source answered — ascent/descent are then unknown, not zero. */
   hasElevationData: boolean;
+  /**
+   * False when the route was never matched against mapped path data. Every
+   * derived percentage is then meaningless and must be shown as unknown
+   * rather than as zero.
+   */
+  analysed: boolean;
   highestPointMetres?: number;
   lowestPointMetres?: number;
   surface: SurfaceBreakdown;

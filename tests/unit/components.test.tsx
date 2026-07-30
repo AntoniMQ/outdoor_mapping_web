@@ -6,6 +6,7 @@ import { classifyPath } from '@/features/rights-of-way/access-policy';
 import { createInitialState, editorReducer } from '@/features/manual-routing/reducer';
 import { FeatureInspector } from '@/components/rights-of-way/feature-inspector';
 import { RouteCard } from '@/components/route-results/route-card';
+import { RouteSummary } from '@/components/route-results/route-summary';
 import { WarningList } from '@/components/route-results/warning-list';
 import { ManualToolbar } from '@/components/route-editor/manual-toolbar';
 import { RightsOfWayLegend } from '@/components/rights-of-way/legend';
@@ -54,6 +55,7 @@ const analysedRoute: AnalysedRoute = {
     ascentMetres: 420,
     descentMetres: 415,
     hasElevationData: true,
+    analysed: true,
     surface: { pavedPercent: 20, unpavedPercent: 60, unknownPercent: 20, offRoadPercent: 72 },
     designation: {
       publicFootpathPercent: 4,
@@ -221,6 +223,26 @@ describe('ManualToolbar', () => {
     expect(dispatch).toHaveBeenCalledWith({ type: 'reverse' });
     await userEvent.click(screen.getByTestId('delete-point-0'));
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'delete-point' }));
+  });
+});
+
+describe('unanalysed routes', () => {
+  const unanalysed: AnalysedRoute = {
+    ...analysedRoute,
+    analysis: { ...analysedRoute.analysis, analysed: false, hasElevationData: false },
+  };
+
+  it('shows unknown rather than zero for every derived figure', () => {
+    render(<RouteCard result={unanalysed} index={0} selected={false} onSelect={() => {}} />);
+    expect(screen.getByText('Not analysed')).toBeInTheDocument();
+    expect(screen.queryByText('72%')).not.toBeInTheDocument();
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('explains why the figures are missing in the summary', () => {
+    render(<RouteSummary result={unanalysed} />);
+    expect(screen.getByText(/unknown rather than zero/i)).toBeInTheDocument();
+    expect(screen.getAllByText('Not available').length).toBeGreaterThan(0);
   });
 });
 

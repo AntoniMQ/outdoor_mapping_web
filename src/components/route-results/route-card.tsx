@@ -19,6 +19,8 @@ export function RouteCard({
   index: number;
 }) {
   const { analysis } = result;
+  const unknown = '—';
+  const pct = (value: number) => (analysis.analysed ? formatPercent(value) : unknown);
   const critical = analysis.warnings.filter((warning) => warning.severity === 'critical');
   const caution = analysis.warnings.filter((warning) => warning.severity === 'caution');
 
@@ -64,22 +66,26 @@ export function RouteCard({
         </div>
         <div>
           <dt className="text-[var(--color-ink-muted)]">Off-road</dt>
-          <dd className="font-semibold">{formatPercent(analysis.surface.offRoadPercent)}</dd>
+          <dd className="font-semibold">{pct(analysis.surface.offRoadPercent)}</dd>
         </div>
         <div>
           <dt className="text-[var(--color-ink-muted)]">Confirmed access</dt>
-          <dd className="font-semibold">{formatPercent(analysis.access.confirmedPercent)}</dd>
+          <dd className="font-semibold">{pct(analysis.access.confirmedPercent)}</dd>
         </div>
         <div>
           <dt className="text-[var(--color-ink-muted)]">Uncertain</dt>
-          <dd className="font-semibold">{formatPercent(analysis.access.uncertainPercent)}</dd>
+          <dd className="font-semibold">{pct(analysis.access.uncertainPercent)}</dd>
         </div>
       </dl>
 
       <div className="mt-2 flex flex-wrap gap-1.5">
-        <Badge tone="neutral">
-          Surface data {formatPercent(analysis.coverage.surfaceDataPercent)}
-        </Badge>
+        {analysis.analysed ? (
+          <Badge tone="neutral">
+            Surface data {formatPercent(analysis.coverage.surfaceDataPercent)}
+          </Badge>
+        ) : (
+          <Badge tone="caution">Not analysed</Badge>
+        )}
         {critical.length > 0 ? (
           <Badge tone="critical">{critical.length} critical warning(s)</Badge>
         ) : null}

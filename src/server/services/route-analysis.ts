@@ -132,6 +132,7 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
       ascentMetres: route.ascentMetres ?? 0,
       descentMetres: route.descentMetres ?? 0,
       hasElevationData,
+      analysed: true,
       highestPointMetres: undefined,
       lowestPointMetres: undefined,
       surface,
