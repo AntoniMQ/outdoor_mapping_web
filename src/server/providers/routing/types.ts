@@ -28,6 +28,9 @@ export interface ProviderHealth {
 export interface RoutingProvider {
   readonly name: string;
   readonly isSynthetic: boolean;
+  /** Upper bound this provider is comfortable with (shared community services are low). */
+  readonly maxConcurrency?: number;
+  readonly maxCandidateCount?: number;
   route(request: ProviderRouteRequest): Promise<ProviderRouteResult>;
   healthCheck?(): Promise<ProviderHealth>;
 }
@@ -38,6 +41,8 @@ export interface RoutingContext {
   signal?: AbortSignal;
   requestId: string;
   concurrency: number;
+  /** How many circular candidates to generate. Lower it for rate-limited providers. */
+  candidateCount?: number;
 }
 
 export function requireCoordinates(coordinates: Coordinate[]): void {

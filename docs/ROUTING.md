@@ -1,5 +1,13 @@
 # Routing
 
+## Providers
+
+| Provider           | Credentials | Notes                                                                                                     |
+| ------------------ | ----------- | --------------------------------------------------------------------------------------------------------- |
+| `valhalla`         | none        | Recommended for a fully live deployment. Profiles map exactly; no way ids, so analysis matches spatially. |
+| `openrouteservice` | API key     | Returns surface/waytype extras, so segment attribution is richer. Gravel is approximated.                 |
+| `fixture`          | none        | Deterministic synthetic A* over a generated lattice. Demo and tests only.                                 |
+
 ## Activity profiles
 
 | TrailLoop | openrouteservice profile | Notes                                                                                                                                  |

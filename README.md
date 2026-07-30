@@ -141,7 +141,8 @@ deploying publicly.
 ## Known limitations
 
 - Fixture mode is synthetic. It exercises every code path but the geometry is not a real place.
-- openrouteservice has no dedicated gravel profile; TrailLoop approximates it and says so in the UI.
+- openrouteservice has no dedicated gravel profile; TrailLoop approximates it and says so in the UI. Valhalla maps all four profiles exactly.
+- The public Valhalla and Overpass instances are shared community services. They are rate-limited and are not suitable for heavy traffic; self-host for anything beyond personal use.
 - Live rights-of-way data comes from Overpass by default, which is unsuitable for production traffic — see
   [docs/OSM_DATA_PIPELINE.md](docs/OSM_DATA_PIPELINE.md) for the PostGIS route.
 - Route-to-path matching can be ambiguous where ways run in parallel; those sections are reported as uncertain rather

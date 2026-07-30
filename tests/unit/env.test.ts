@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseServerEnv } from '@/lib/env/server';
+import { formatList, isFixtureMode, parseServerEnv, syntheticProviders } from '@/lib/env/server';
 
 const base = { NODE_ENV: 'test' } as NodeJS.ProcessEnv;
 
@@ -94,5 +94,38 @@ describe('resilience to bad optional configuration', () => {
     });
     expect(env.ROUTING_PROVIDER).toBe('openrouteservice');
     expect(env.DATABASE_URL).toContain('postgresql://');
+  });
+});
+
+describe('keyless live configuration', () => {
+  it('allows a fully live setup with no credentials at all', () => {
+    const env = parseServerEnv({
+      ...base,
+      APP_DATA_MODE: 'live',
+      ROUTING_PROVIDER: 'valhalla',
+      RIGHTS_OF_WAY_PROVIDER: 'overpass',
+      GEOCODING_PROVIDER: 'nominatim',
+      ELEVATION_PROVIDER: 'open-meteo',
+    });
+    expect(env.ROUTING_PROVIDER).toBe('valhalla');
+    expect(env.RIGHTS_OF_WAY_PROVIDER).toBe('overpass');
+    expect(isFixtureMode(env)).toBe(false);
+    expect(syntheticProviders(env)).toEqual([]);
+  });
+
+  it('names exactly which parts are still synthetic', () => {
+    const env = parseServerEnv({
+      ...base,
+      APP_DATA_MODE: 'live',
+      RIGHTS_OF_WAY_PROVIDER: 'overpass',
+      GEOCODING_PROVIDER: 'nominatim',
+      ELEVATION_PROVIDER: 'open-meteo',
+    });
+    expect(syntheticProviders(env)).toEqual(['routes']);
+    expect(formatList(syntheticProviders(env))).toBe('routes');
+    expect(formatList(['routes', 'elevation'])).toBe('routes and elevation');
+    expect(formatList(['routes', 'place search', 'elevation'])).toBe(
+      'routes, place search and elevation',
+    );
   });
 });

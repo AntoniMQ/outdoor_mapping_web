@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import type { Metadata } from 'next';
-import { isFixtureMode, serverEnv } from '@/lib/env/server';
+import { formatList, isFixtureMode, serverEnv, syntheticProviders } from '@/lib/env/server';
 import { DataModeBanner } from '@/components/layout/data-mode-banner';
 import { Planner } from '@/components/planner/planner';
 
@@ -13,10 +13,12 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 export default function PlannerPage() {
-  const fixtureMode = isFixtureMode(serverEnv());
+  const env = serverEnv();
+  const fixtureMode = isFixtureMode(env);
+  const syntheticParts = formatList(syntheticProviders(env));
   return (
     <main className="flex flex-1 flex-col">
-      <DataModeBanner fixtureMode={fixtureMode} />
+      <DataModeBanner fixtureMode={fixtureMode} syntheticParts={syntheticParts} />
       <Suspense
         fallback={
           <div className="p-6 text-sm text-[var(--color-ink-muted)]" role="status">

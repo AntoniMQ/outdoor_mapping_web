@@ -1,7 +1,16 @@
 import { FlaskConical } from 'lucide-react';
 
-export function DataModeBanner({ fixtureMode }: { fixtureMode: boolean }) {
+export function DataModeBanner({
+  fixtureMode,
+  syntheticParts,
+}: {
+  fixtureMode: boolean;
+  /** Human-readable list, e.g. "routes and elevation". Empty when everything is live. */
+  syntheticParts?: string;
+}) {
   if (!fixtureMode) return null;
+  const parts =
+    syntheticParts && syntheticParts.length > 0 ? syntheticParts : 'routes, paths and elevation';
   return (
     <div
       role="status"
@@ -10,8 +19,9 @@ export function DataModeBanner({ fixtureMode }: { fixtureMode: boolean }) {
     >
       <FlaskConical aria-hidden size={14} />
       <span>
-        <strong>Demo data — not live mapping information.</strong> Routes, paths and elevation are
-        generated from a deterministic synthetic network so the app works without API credentials.
+        <strong>Demo data in use.</strong> On this deployment, {parts}{' '}
+        {parts.includes(' and ') ? 'are' : 'is'} generated from a deterministic synthetic network
+        rather than live services. Everything else shown is real data.
       </span>
     </div>
   );

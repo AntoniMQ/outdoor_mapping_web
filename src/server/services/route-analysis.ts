@@ -1,4 +1,5 @@
 import type {
+  RightsOfWayCollection,
   AccessPolicy,
   ActivityProfile,
   Coordinate,
@@ -33,6 +34,12 @@ export interface RouteAnalysisContext {
   /** Segment indexes drawn by hand — access cannot be verified for these. */
   manualSegmentIndexes?: number[];
   requestId?: string;
+  /**
+   * Pre-fetched rights-of-way features. Supplying these lets a caller analysing
+   * many routes in one area issue a single upstream query instead of one per
+   * route — important with live Overpass data.
+   */
+  features?: RightsOfWayCollection;
 }
 
 export interface RouteAnalysisResult extends RouteAnalysis {
@@ -63,15 +70,16 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
     const coordinates = route.geometry.coordinates as Coordinate[];
     const jurisdiction = context.jurisdiction ?? inferJurisdiction(coordinates[0] ?? [0, 0]);
 
-    const provider = getRightsOfWayProvider();
-    const features = await provider
-      .getFeatures(padBoundingBox(route.bbox, 150), {
-        jurisdiction,
-        signal: context.signal,
-        limit: 4_000,
-        requestId: context.requestId,
-      })
-      .catch(() => ({ type: 'FeatureCollection' as const, features: [] }));
+    const features =
+      context.features ??
+      (await getRightsOfWayProvider()
+        .getFeatures(padBoundingBox(route.bbox, 150), {
+          jurisdiction,
+          signal: context.signal,
+          limit: 4_000,
+          requestId: context.requestId,
+        })
+        .catch(() => ({ type: 'FeatureCollection' as const, features: [] })));
 
     const { segments, debug, matchedDistanceMetres } = matchRouteToRightsOfWay(route, features, {
       jurisdiction,

@@ -43,7 +43,8 @@ const serverSchema = z.object({
 
   DATABASE_URL: optionalUrl,
 
-  ROUTING_PROVIDER: z.enum(['openrouteservice', 'fixture']).default('fixture'),
+  ROUTING_PROVIDER: z.enum(['valhalla', 'openrouteservice', 'fixture']).default('fixture'),
+  VALHALLA_BASE_URL: z.string().url().default('https://valhalla1.openstreetmap.de'),
   ORS_API_KEY: optionalSecret(10),
   ORS_BASE_URL: z.string().url().default('https://api.openrouteservice.org'),
 
@@ -62,6 +63,8 @@ const serverSchema = z.object({
   UPSTREAM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60_000).default(15_000),
   MAX_BBOX_AREA_SQ_KM: z.coerce.number().positive().max(10_000).default(400),
   ROUTE_CANDIDATE_CONCURRENCY: z.coerce.number().int().min(1).max(12).default(4),
+  /** Lower this for rate-limited providers such as the openrouteservice free tier. */
+  CIRCULAR_CANDIDATE_COUNT: z.coerce.number().int().min(6).max(48).default(24),
   CONTACT_EMAIL: z.string().default('trailloop@example.org'),
 });
 
@@ -121,9 +124,24 @@ export function resetServerEnvCache(): void {
 
 /** True when any provider is serving deterministic synthetic data. */
 export function isFixtureMode(env: ServerEnv = serverEnv()): boolean {
-  return (
-    env.APP_DATA_MODE === 'fixture' ||
-    env.ROUTING_PROVIDER === 'fixture' ||
-    env.RIGHTS_OF_WAY_PROVIDER === 'fixture'
-  );
+  return syntheticProviders(env).length > 0;
+}
+
+/**
+ * Names the parts of the application that are still synthetic, so the demo
+ * banner can be specific instead of implying everything is fake.
+ */
+export function syntheticProviders(env: ServerEnv = serverEnv()): string[] {
+  const parts: string[] = [];
+  if (env.ROUTING_PROVIDER === 'fixture') parts.push('routes');
+  if (env.RIGHTS_OF_WAY_PROVIDER === 'fixture') parts.push('path and rights-of-way data');
+  if (env.GEOCODING_PROVIDER === 'fixture') parts.push('place search');
+  if (env.ELEVATION_PROVIDER === 'fixture') parts.push('elevation');
+  return parts;
+}
+
+/** "routes and elevation" / "routes, place search and elevation" */
+export function formatList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }

@@ -32,7 +32,14 @@ export async function POST(request: Request) {
       provider,
       signal: request.signal,
       requestId,
-      concurrency: env.ROUTE_CANDIDATE_CONCURRENCY,
+      concurrency: Math.min(
+        env.ROUTE_CANDIDATE_CONCURRENCY,
+        provider.maxConcurrency ?? Number.MAX_SAFE_INTEGER,
+      ),
+      candidateCount: Math.min(
+        env.CIRCULAR_CANDIDATE_COUNT,
+        provider.maxCandidateCount ?? Number.MAX_SAFE_INTEGER,
+      ),
     });
 
     const elevationProvider = getElevationProvider();

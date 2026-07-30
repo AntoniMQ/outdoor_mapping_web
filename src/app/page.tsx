@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Bike, Compass, Download, Map, PencilRuler, ShieldQuestion } from 'lucide-react';
 import { BRAND } from '@/lib/env/client';
-import { isFixtureMode, serverEnv } from '@/lib/env/server';
+import { formatList, isFixtureMode, serverEnv, syntheticProviders } from '@/lib/env/server';
 import { DataModeBanner } from '@/components/layout/data-mode-banner';
 
 const FEATURES = [
@@ -40,10 +40,12 @@ const FEATURES = [
 export const dynamic = 'force-dynamic';
 
 export default function HomePage() {
-  const fixtureMode = isFixtureMode(serverEnv());
+  const env = serverEnv();
+  const fixtureMode = isFixtureMode(env);
+  const syntheticParts = formatList(syntheticProviders(env));
   return (
     <main className="flex flex-1 flex-col">
-      <DataModeBanner fixtureMode={fixtureMode} />
+      <DataModeBanner fixtureMode={fixtureMode} syntheticParts={syntheticParts} />
       <section className="border-b border-[var(--color-line)] bg-[var(--color-surface)]">
         <div className="mx-auto max-w-5xl px-4 py-14">
           <p className="text-xs font-semibold tracking-[0.2em] text-[var(--color-moss)] uppercase">

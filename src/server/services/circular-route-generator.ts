@@ -1,4 +1,5 @@
 import type {
+  RightsOfWayCollection,
   AnalysedRoute,
   CandidateLabelKey,
   CircularRouteRequest,
@@ -9,7 +10,7 @@ import type {
 import { ApiError } from '@/lib/http/api-error';
 import { mapWithConcurrency } from '@/lib/http/fetch-json';
 import { logger } from '@/lib/logging/logger';
-import { haversineMetres } from '@/lib/geo/geometry';
+import { boundingBoxAreaSqKm, haversineMetres, padBoundingBox } from '@/lib/geo/geometry';
 import {
   generateAnchorCandidates,
   rescaleCandidate,
@@ -30,6 +31,7 @@ import {
 import { dedupeRoutes } from '@/features/circular-routing/dedupe';
 import { isHighStressRoad } from '@/features/rights-of-way/access-policy';
 import { getRoutingProvider } from '@/server/providers/routing';
+import { getRightsOfWayProvider } from '@/server/providers/osm';
 import type { RoutingContext } from '@/server/providers/routing/types';
 import {
   getRouteAnalysisService,
@@ -60,12 +62,17 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
     request: CircularRouteRequest,
     context: RoutingContext,
   ): Promise<CircularRouteCandidate[]> {
-    const candidateCount = 24;
+    const candidateCount = context.candidateCount ?? 24;
     const anchors = generateAnchorCandidates(request, candidateCount);
     const analysisService = getRouteAnalysisService();
 
+    // Shared budget: once an upstream provider rate-limits us, generating more
+    // candidates only makes it worse, so remaining candidates are abandoned and
+    // we rank whatever came back.
+    const budget: GenerationBudget = { rateLimited: false, failures: 0 };
+
     const routed = await mapWithConcurrency(anchors, context.concurrency, (anchor, index) =>
-      this.routeWithConvergence(request, anchor, index, context),
+      this.routeWithConvergence(request, anchor, index, context, budget),
     );
 
     const successes = routed
@@ -78,8 +85,10 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
 
     if (successes.length === 0) {
       throw new ApiError(
-        'NO_ROUTE_FOUND',
-        'No circular route could be generated from this start point with the selected preferences.',
+        budget.rateLimited ? 'RATE_LIMITED' : 'NO_ROUTE_FOUND',
+        budget.rateLimited
+          ? 'The routing provider rate-limited this request before any route could be built. Wait a moment and try again, or lower CIRCULAR_CANDIDATE_COUNT.'
+          : 'No circular route could be generated from this start point with the selected preferences.',
       );
     }
 
@@ -135,18 +144,47 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
     return selectAlternatives(unique.length >= 3 ? unique : scored);
   }
 
+  /** Union bounding box of every candidate, queried once. */
+  private async loadSharedFeatures(
+    candidates: RoutedCandidate[],
+    context: RoutingContext,
+  ): Promise<RightsOfWayCollection | undefined> {
+    if (candidates.length === 0) return undefined;
+    let [minLon, minLat, maxLon, maxLat] = candidates[0]!.route.bbox;
+    for (const candidate of candidates) {
+      const [a, b, c, d] = candidate.route.bbox;
+      minLon = Math.min(minLon, a);
+      minLat = Math.min(minLat, b);
+      maxLon = Math.max(maxLon, c);
+      maxLat = Math.max(maxLat, d);
+    }
+    const bbox = padBoundingBox([minLon, minLat, maxLon, maxLat], 200);
+
+    // Fall back to per-route queries if the union is too large to ask for at once.
+    if (boundingBoxAreaSqKm(bbox) > 1_200) return undefined;
+
+    return getRightsOfWayProvider()
+      .getFeatures(bbox, {
+        signal: context.signal,
+        limit: 8_000,
+        requestId: context.requestId,
+      })
+      .catch(() => undefined);
+  }
+
   private async routeWithConvergence(
     request: CircularRouteRequest,
     initialAnchor: AnchorCandidate,
     index: number,
     context: RoutingContext,
+    budget: GenerationBudget,
   ): Promise<RoutedCandidate | null> {
     const provider = getRoutingProvider();
     let anchor = initialAnchor;
     let best: RoutedCandidate | null = null;
 
     for (let iteration = 0; iteration <= MAX_CONVERGENCE_ITERATIONS; iteration += 1) {
-      if (context.signal?.aborted) return best;
+      if (context.signal?.aborted || budget.rateLimited) return best;
       const coordinates: Coordinate[] = [request.start, ...anchor.anchors, request.start];
       let result;
       try {
@@ -158,10 +196,19 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
           requestId: context.requestId,
         });
       } catch (error) {
-        logger.debug('Circular candidate routing failed', {
-          candidate: anchor.id,
-          error: (error as Error).message,
-        });
+        budget.failures += 1;
+        if (error instanceof ApiError && error.code === 'RATE_LIMITED') {
+          budget.rateLimited = true;
+          logger.warn('Routing provider rate-limited candidate generation', {
+            candidate: anchor.id,
+            completed: index,
+          });
+        } else {
+          logger.debug('Circular candidate routing failed', {
+            candidate: anchor.id,
+            error: (error as Error).message,
+          });
+        }
         return best;
       }
 
@@ -182,6 +229,11 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
     }
     return best;
   }
+}
+
+interface GenerationBudget {
+  rateLimited: boolean;
+  failures: number;
 }
 
 interface RoutedCandidate {
