@@ -13,8 +13,16 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const env = serverEnv();
+    // Which build is actually serving. Without this, "is my fix deployed?" is
+    // guesswork, and stale builds get mistaken for broken code.
+    const commit = process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA;
     return NextResponse.json({
       status: 'ok',
+      build: {
+        commit: commit ? commit.slice(0, 7) : 'unknown',
+        ref: process.env.VERCEL_GIT_COMMIT_REF ?? 'local',
+        deploymentId: process.env.VERCEL_DEPLOYMENT_ID ?? 'local',
+      },
       dataMode: env.APP_DATA_MODE,
       fixtureMode: isFixtureMode(env),
       database: isDatabaseConfigured() ? 'configured' : 'not-configured',
