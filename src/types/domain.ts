@@ -247,6 +247,13 @@ export interface RouteScoreComponents {
   loopShapeQuality: number;
 }
 
+export interface NearbyNetworkSummary {
+  cycleLegalKm: number;
+  footpathOnlyKm: number;
+  unknownKm: number;
+  roadKm: number;
+}
+
 export interface RouteAnalysis {
   distanceMetres: number;
   durationSeconds: number;
@@ -270,6 +277,8 @@ export interface RouteAnalysis {
   warnings: RouteWarning[];
   jurisdiction: Jurisdiction;
   matchedDistanceMetres: number;
+  /** The mapped network around the route — explains a road-heavy result. */
+  nearbyNetwork?: NearbyNetworkSummary;
   isSyntheticData: boolean;
 }
 

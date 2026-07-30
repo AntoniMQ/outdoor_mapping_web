@@ -10,7 +10,7 @@ import type {
   RouteWarningCode,
   WarningSeverity,
 } from '@/types/domain';
-import { downsample, padBoundingBox } from '@/lib/geo/geometry';
+import { downsample, lineLengthMetres, padBoundingBox } from '@/lib/geo/geometry';
 import { logger } from '@/lib/logging/logger';
 import { travelModeOf } from '@/features/routing/profiles';
 import {
@@ -18,6 +18,7 @@ import {
   coverageBreakdown,
   designationBreakdown,
   repeatedFraction,
+  summariseNearbyNetwork,
   surfaceBreakdown,
   totalDistance,
   type AnalysedSegment,
@@ -188,6 +189,13 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
       warnings,
       jurisdiction,
       matchedDistanceMetres,
+      nearbyNetwork: summariseNearbyNetwork(
+        features.features.map((feature) => ({
+          tags: feature.properties.tags,
+          classification: feature.properties.classification,
+          lengthMetres: lineLengthMetres(feature.geometry.coordinates as Coordinate[]),
+        })),
+      ),
       isSyntheticData: route.isSyntheticData,
       debug: { match: debug, diagnostics },
     };

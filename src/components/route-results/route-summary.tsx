@@ -119,6 +119,40 @@ export function RouteSummary({
         </Panel>
       ) : null}
 
+      {analysis.nearbyNetwork ? (
+        <Panel title="Off-road network near this route">
+          <StatGrid
+            items={[
+              {
+                label: 'Cycle-legal off-road',
+                value: `${analysis.nearbyNetwork.cycleLegalKm.toFixed(1)} km`,
+                hint: 'Bridleways, byways, cycleways and paths with explicit cycling permission.',
+              },
+              {
+                label: 'Walking only',
+                value: `${analysis.nearbyNetwork.footpathOnlyKm.toFixed(1)} km`,
+                hint: 'Chiefly public footpaths, where cycling is not permitted.',
+              },
+              {
+                label: 'Status not mapped',
+                value: `${analysis.nearbyNetwork.unknownKm.toFixed(1)} km`,
+              },
+            ]}
+          />
+          {analysis.nearbyNetwork.cycleLegalKm < analysis.nearbyNetwork.footpathOnlyKm / 2 ? (
+            <p
+              className="mt-2 text-xs text-[var(--color-ink-muted)]"
+              data-testid="network-explanation"
+            >
+              Most of the off-road network here is walking-only, so a cycling route has little
+              choice but to use roads. This is a property of the area, not of your settings — moving
+              the start point towards open access land or a bridleway network will change it more
+              than any preference will.
+            </p>
+          ) : null}
+        </Panel>
+      ) : null}
+
       {result.diagnostics ? (
         <Panel title="Path-data match">
           <p className="text-xs text-[var(--color-ink-muted)]" data-testid="match-diagnostics">

@@ -4,6 +4,7 @@ import {
   coverageBreakdown,
   designationBreakdown,
   repeatedFraction,
+  summariseNearbyNetwork,
   surfaceBreakdown,
   type AnalysedSegment,
 } from '@/features/route-analysis/metrics';
@@ -98,5 +99,44 @@ describe('repeatedFraction', () => {
       [-0.4, 51.65],
     ];
     expect(repeatedFraction(straight)).toBeLessThan(0.05);
+  });
+});
+
+describe('summariseNearbyNetwork', () => {
+  const feature = (tags: Record<string, string>, lengthMetres: number) => ({
+    tags,
+    classification: classifyPath(tags, 'england-wales'),
+    lengthMetres,
+  });
+
+  it('separates cycle-legal off-road from walking-only', () => {
+    const summary = summariseNearbyNetwork([
+      feature({ highway: 'bridleway', designation: 'public_bridleway' }, 2_000),
+      feature({ highway: 'track', designation: 'byway_open_to_all_traffic' }, 1_000),
+      feature({ highway: 'footway', designation: 'public_footpath' }, 8_000),
+      feature({ highway: 'path' }, 3_000),
+      feature({ highway: 'residential' }, 5_000),
+    ]);
+
+    expect(summary.cycleLegalKm).toBeCloseTo(3, 1);
+    expect(summary.footpathOnlyKm).toBeCloseTo(8, 1);
+    expect(summary.unknownKm).toBeCloseTo(3, 1);
+    expect(summary.roadKm).toBeCloseTo(5, 1);
+  });
+
+  it('counts permissive cycling access as usable', () => {
+    const summary = summariseNearbyNetwork([
+      feature({ highway: 'path', bicycle: 'permissive' }, 1_500),
+    ]);
+    expect(summary.cycleLegalKm).toBeCloseTo(1.5, 1);
+  });
+
+  it('returns zeroes for an empty area rather than failing', () => {
+    expect(summariseNearbyNetwork([])).toEqual({
+      cycleLegalKm: 0,
+      footpathOnlyKm: 0,
+      unknownKm: 0,
+      roadKm: 0,
+    });
   });
 });

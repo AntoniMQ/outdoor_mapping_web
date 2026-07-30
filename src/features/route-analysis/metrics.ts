@@ -10,6 +10,17 @@ import type {
 import { isRoad } from '@/features/rights-of-way/access-policy';
 import { densify } from '@/lib/geo/geometry';
 
+export interface NearbyNetwork {
+  /** Off-road ways a cyclist may use: bridleways, byways, cycleways, explicit permission. */
+  cycleLegalKm: number;
+  /** Off-road ways that are walking-only, chiefly public footpaths. */
+  footpathOnlyKm: number;
+  /** Off-road ways whose status OpenStreetMap does not record. */
+  unknownKm: number;
+  /** Carriageways, which cyclists may use but which are not off-road. */
+  roadKm: number;
+}
+
 export interface AnalysedSegment {
   index: number;
   distanceMetres: number;
@@ -22,6 +33,39 @@ const pct = (part: number, total: number): number => (total <= 0 ? 0 : (part / t
 
 export function totalDistance(segments: readonly AnalysedSegment[]): number {
   return segments.reduce((sum, segment) => sum + segment.distanceMetres, 0);
+}
+
+/**
+ * Summarises the mapped network around a route, so a road-heavy result can be
+ * explained rather than left looking like a routing failure. An area with one
+ * bridleway and thirty public footpaths cannot produce an off-road ride,
+ * however the preferences are set.
+ */
+export function summariseNearbyNetwork(
+  features: ReadonlyArray<{
+    tags: OsmPathTags;
+    classification: PathClassification;
+    lengthMetres: number;
+  }>,
+): NearbyNetwork {
+  const totals = { cycleLegalKm: 0, footpathOnlyKm: 0, unknownKm: 0, roadKm: 0 };
+  for (const feature of features) {
+    const km = feature.lengthMetres / 1000;
+    if (isRoad(feature.tags)) {
+      totals.roadKm += km;
+      continue;
+    }
+    const status = feature.classification.cycling.cyclingStatus;
+    if (status === 'confirmed' || status === 'permissive') totals.cycleLegalKm += km;
+    else if (status === 'not-confirmed' || status === 'prohibited') totals.footpathOnlyKm += km;
+    else totals.unknownKm += km;
+  }
+  return {
+    cycleLegalKm: Number(totals.cycleLegalKm.toFixed(1)),
+    footpathOnlyKm: Number(totals.footpathOnlyKm.toFixed(1)),
+    unknownKm: Number(totals.unknownKm.toFixed(1)),
+    roadKm: Number(totals.roadKm.toFixed(1)),
+  };
 }
 
 /** All percentages are weighted by segment distance, never by feature count. */
