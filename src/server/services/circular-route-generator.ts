@@ -204,7 +204,11 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
         direction: anchor.direction,
       };
 
-      const reason = rejectionReason(route, analysis, request);
+      // With deferred analysis there is no access or coverage data yet, so only
+      // the geometric constraints can be judged.
+      const reason = rejectionReason(route, analysis, request, {
+        geometryOnly: Boolean(context.deferAnalysis),
+      });
       if (reason) {
         rejectionCounts.set(reason, (rejectionCounts.get(reason) ?? 0) + 1);
         rejected.push({ candidate, reason });
@@ -505,10 +509,19 @@ function rejectionReason(
   route: NormalisedRoute,
   analysis: RouteAnalysisResult,
   request: CircularRouteRequest,
+  options: { geometryOnly?: boolean } = {},
 ): RejectionReason | null {
   const error =
     Math.abs(route.distanceMetres - request.targetDistanceMetres) / request.targetDistanceMetres;
   if (error > ACCEPTABLE_TOLERANCE * 1.75) return 'distance-mismatch';
+
+  if (options.geometryOnly) {
+    const coordinates = route.geometry.coordinates as Coordinate[];
+    const first = coordinates[0];
+    const last = coordinates[coordinates.length - 1];
+    if (!first || !last || haversineMetres(first, last) > 250) return 'loop-not-closed';
+    return null;
+  }
   if (analysis.access.prohibitedPercent > 0.5) return 'prohibited-access';
   if (request.accessPolicy === 'strict' && analysis.access.notConfirmedPercent > 1) {
     return 'footpath-only-section-under-strict-policy';

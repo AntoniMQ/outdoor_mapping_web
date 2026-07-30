@@ -14,7 +14,7 @@ import type {
 } from '@/types/domain';
 import { unitToMetres } from '@/lib/format';
 import { combinedGeometry } from '@/features/manual-routing/reducer';
-import { labelAlternatives } from '@/features/circular-routing/labels';
+import { describeRoute, labelAlternatives } from '@/features/circular-routing/labels';
 import { toMapFeatures } from '@/components/map/map-features';
 import { useRightsOfWay, RIGHTS_OF_WAY_MIN_ZOOM } from '@/features/api/hooks';
 import {
@@ -232,7 +232,15 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
             activityProfile: store.activityProfile,
             accessPolicy: store.accessPolicy,
           });
-          return { ...item, analysis: response.analysis, elevation: response.elevation };
+          const analysed = { ...item, analysis: response.analysis, elevation: response.elevation };
+          // The generation-time rationale predates any path data; replace it.
+          return {
+            ...analysed,
+            rationale: describeRoute(
+              analysed,
+              unitToMetres(store.targetDistance, store.distanceUnit),
+            ),
+          };
         } catch {
           // Upstream path data is slow and occasionally times out; one retry
           // clears most of it. The cached result makes the retry cheap.
@@ -241,7 +249,7 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
       }
       return item;
     },
-    [store.activityProfile, store.accessPolicy],
+    [store.activityProfile, store.accessPolicy, store.targetDistance, store.distanceUnit],
   );
 
   const analyseResults = useCallback(

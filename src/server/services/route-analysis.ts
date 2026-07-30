@@ -144,7 +144,10 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
       ascentMetres: route.ascentMetres ?? 0,
       descentMetres: route.descentMetres ?? 0,
       hasElevationData,
-      analysed: true,
+      // If nothing matched, every derived figure is meaningless. Reporting
+      // "analysed" here is how a route ends up claiming 0% off-road when the
+      // truth is that no path data was found for it at all.
+      analysed: matchedDistanceMetres > 0,
       highestPointMetres: undefined,
       lowestPointMetres: undefined,
       surface,

@@ -6,7 +6,7 @@ import {
   rescaleCandidate,
 } from '@/features/circular-routing/anchors';
 import { dedupeRoutes, routeOverlap, routeSignature } from '@/features/circular-routing/dedupe';
-import { labelAlternatives } from '@/features/circular-routing/labels';
+import { describeRoute, labelAlternatives } from '@/features/circular-routing/labels';
 import {
   accessConfidenceScore,
   climbingFitScore,
@@ -365,5 +365,63 @@ describe('alternative labelling', () => {
     const labelled = labelAlternatives(routes);
     expect(labelled.map((route) => route.label)).toEqual(['Option 1', 'Option 2']);
     expect(labelled.every((route) => route.labelKey === undefined)).toBe(true);
+  });
+});
+
+describe('route descriptions', () => {
+  const analysed: AnalysedRoute = {
+    route: makeRoute('d', [
+      [-0.5, 51.65],
+      [-0.49, 51.65],
+    ]),
+    analysis: {
+      distanceMetres: 24_900,
+      durationSeconds: 6_360,
+      ascentMetres: 402,
+      descentMetres: 402,
+      hasElevationData: true,
+      analysed: true,
+      surface: { pavedPercent: 40, unpavedPercent: 15, unknownPercent: 45, offRoadPercent: 15 },
+      designation: {
+        publicFootpathPercent: 0,
+        publicBridlewayPercent: 10,
+        restrictedBywayPercent: 0,
+        bywayOpenToAllTrafficPercent: 0,
+        permissivePercent: 0,
+        roadPercent: 60,
+        otherPercent: 30,
+      },
+      access: {
+        confirmedPercent: 66,
+        permissivePercent: 0,
+        uncertainPercent: 28,
+        notConfirmedPercent: 6,
+        prohibitedPercent: 0,
+      },
+      coverage: { accessDataPercent: 72, surfaceDataPercent: 45, technicalDataPercent: 5 },
+      repeatedPercent: 2,
+      warnings: [],
+      jurisdiction: 'england-wales',
+      matchedDistanceMetres: 18_000,
+      isSyntheticData: false,
+    },
+  };
+
+  it('describes the route using the figures actually measured', () => {
+    const reasons = describeRoute(analysed, 25_000);
+    expect(reasons.join(' ')).toContain('15% off-road');
+    expect(reasons.join(' ')).toContain('66% of the distance has confirmed access');
+    expect(reasons.join(' ')).toContain('28% has uncertain mapped access');
+    // Must never contradict the card it sits under.
+    expect(reasons.join(' ')).not.toContain('0% off-road');
+  });
+
+  it('says plainly when a route was never analysed', () => {
+    const reasons = describeRoute(
+      { ...analysed, analysis: { ...analysed.analysis, analysed: false } },
+      25_000,
+    );
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toMatch(/not been checked against mapped path data/i);
   });
 });

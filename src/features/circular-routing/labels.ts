@@ -25,6 +25,47 @@ function easeScore(route: AnalysedRoute): number {
  * Routes that have not been analysed carry no meaningful off-road or access
  * figures, so they keep neutral positional labels instead.
  */
+/**
+ * Describes a route from the analysis in hand. Generation-time rationale is
+ * written before any path data exists, so it must be replaced once analysis
+ * lands — otherwise a card explains itself with figures that contradict the
+ * ones printed directly above.
+ */
+export function describeRoute(route: AnalysedRoute, targetDistanceMetres?: number): string[] {
+  const { analysis } = route;
+  if (!analysis.analysed) {
+    return [
+      'This route has not been checked against mapped path data, so its surface and access figures are unknown.',
+    ];
+  }
+
+  const reasons: string[] = [];
+  if (targetDistanceMetres) {
+    const delta = ((analysis.distanceMetres - targetDistanceMetres) / targetDistanceMetres) * 100;
+    reasons.push(
+      Math.abs(delta) <= 10
+        ? `Within ${Math.abs(delta).toFixed(0)}% of your target distance.`
+        : `${delta > 0 ? 'Longer' : 'Shorter'} than requested by ${Math.abs(delta).toFixed(0)}%.`,
+    );
+  }
+  reasons.push(`${analysis.surface.offRoadPercent.toFixed(0)}% off-road by distance.`);
+  reasons.push(
+    `${analysis.access.confirmedPercent.toFixed(0)}% of the distance has confirmed access for this activity.`,
+  );
+  if (analysis.access.uncertainPercent > 10) {
+    reasons.push(`${analysis.access.uncertainPercent.toFixed(0)}% has uncertain mapped access.`);
+  }
+  if (analysis.access.notConfirmedPercent > 1) {
+    reasons.push(
+      `${analysis.access.notConfirmedPercent.toFixed(0)}% follows paths where cycling is not confirmed.`,
+    );
+  }
+  if (analysis.repeatedPercent > 15) {
+    reasons.push(`Retraces ${analysis.repeatedPercent.toFixed(0)}% of its own distance.`);
+  }
+  return reasons;
+}
+
 export function labelAlternatives<T extends AnalysedRoute>(routes: T[]): T[] {
   if (routes.length === 0) return [];
   if (!routes.every((route) => route.analysis.analysed)) {
