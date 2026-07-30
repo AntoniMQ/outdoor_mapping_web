@@ -7,6 +7,7 @@ import { GET as geocode } from '@/app/api/geocode/search/route';
 import { POST as circular } from '@/app/api/routes/circular/route';
 import { POST as plan } from '@/app/api/routes/plan/route';
 import { POST as analyse } from '@/app/api/routes/analyse/route';
+import { POST as analyseBatch } from '@/app/api/routes/analyse-batch/route';
 import { POST as gpx } from '@/app/api/gpx/export/route';
 import { clearMemoryCache } from '@/server/repositories/cache-repository';
 import { resetRateLimits } from '@/lib/rate-limit/rate-limit';
@@ -332,6 +333,106 @@ describe('GET /api/geocode/search', () => {
 
   it('requires a minimum query length', async () => {
     const response = await geocode(new Request('http://test/api/geocode/search?q=ab'));
+    expect(response.status).toBe(422);
+  });
+});
+
+describe('POST /api/routes/analyse-batch', () => {
+  const line = (offset: number) => ({
+    type: 'LineString' as const,
+    coordinates: [
+      [START[0] + offset, START[1]],
+      [START[0] + offset + 0.01, START[1] + 0.006],
+      [START[0] + offset + 0.02, START[1] + 0.012],
+    ],
+  });
+
+  it('analyses every route from a generation in one request', async () => {
+    // Real generated geometry, so the routes genuinely lie on the network and
+    // matching has something to find.
+    const generated = (await (
+      await circular(
+        post('http://test/api/routes/circular', {
+          start: START,
+          targetDistanceMetres: 12_000,
+          activityProfile: 'mtb',
+          accessPolicy: 'permit-uncertain',
+          deferAnalysis: true,
+        }),
+      )
+    ).json()) as { routes: AnalysedRoute[] };
+
+    const response = await analyseBatch(
+      post('http://test/api/routes/analyse-batch', {
+        routes: generated.routes.map((item) => ({
+          id: item.route.id,
+          geometry: item.route.geometry,
+        })),
+        activityProfile: 'mtb',
+        accessPolicy: 'permit-uncertain',
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      results: Array<{
+        id: string;
+        analysis: {
+          distanceMetres: number;
+          analysed: boolean;
+          access: { confirmedPercent: number };
+        };
+      }>;
+    };
+    expect(body.results).toHaveLength(generated.routes.length);
+    for (const result of body.results) {
+      expect(result.analysis.distanceMetres).toBeGreaterThan(0);
+      expect(result.analysis.analysed).toBe(true);
+      expect(result.analysis.access.confirmedPercent).toBeGreaterThan(0);
+    }
+  });
+
+  it('reports a route as unanalysed when nothing matched, rather than as zero', async () => {
+    const response = await analyseBatch(
+      post('http://test/api/routes/analyse-batch', {
+        // Mid-Atlantic: no path data anywhere near it.
+        routes: [
+          {
+            id: 'nowhere',
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [-30, 45],
+                [-30.01, 45.01],
+              ],
+            },
+          },
+        ],
+        activityProfile: 'mtb',
+      }),
+    );
+
+    const body = (await response.json()) as { results: Array<{ analysis: { analysed: boolean } }> };
+    expect(body.results[0]!.analysis.analysed).toBe(false);
+  });
+
+  it('rejects an empty batch', async () => {
+    const response = await analyseBatch(
+      post('http://test/api/routes/analyse-batch', { routes: [], activityProfile: 'mtb' }),
+    );
+    expect(response.status).toBe(422);
+  });
+
+  it('caps the batch size so one request cannot fan out without bound', async () => {
+    const response = await analyseBatch(
+      post('http://test/api/routes/analyse-batch', {
+        routes: Array.from({ length: 8 }, (_, index) => ({
+          id: `r${index}`,
+          geometry: line(index * 0.002),
+        })),
+        activityProfile: 'mtb',
+      }),
+    );
     expect(response.status).toBe(422);
   });
 });

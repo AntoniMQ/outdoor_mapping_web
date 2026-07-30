@@ -103,6 +103,26 @@ export type RightsOfWayResponse = RightsOfWayCollection & {
   };
 };
 
+export interface AnalyseBatchResponse {
+  results: Array<{ id: string; analysis: RouteAnalysis; elevation?: ElevationProfile }>;
+  isSyntheticData: boolean;
+}
+
+export function analyseRoutes(
+  body: {
+    routes: Array<{ id: string; geometry: { type: 'LineString'; coordinates: Coordinate[] } }>;
+    activityProfile: ActivityProfile;
+    accessPolicy: AccessPolicy;
+  },
+  signal?: AbortSignal,
+): Promise<AnalyseBatchResponse> {
+  return request<AnalyseBatchResponse>('/api/routes/analyse-batch', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
 export function fetchRightsOfWay(
   bbox: BoundingBox,
   zoom: number,

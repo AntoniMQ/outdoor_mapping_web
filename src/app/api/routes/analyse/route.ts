@@ -16,6 +16,13 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+/**
+ * Vertices per analysis segment. Long chunks span several ways, and a chunk's
+ * overall bearing then matches none of them, so everything falls through as
+ * unmatched. Short chunks keep each segment on one way.
+ */
+const ANALYSIS_CHUNK_VERTICES = 8;
+
 const ANALYSIS_CACHE_VERSION = 'v1';
 const ANALYSIS_CACHE_TTL_MS = 60 * 60 * 1000;
 
@@ -77,7 +84,7 @@ export async function POST(request: Request) {
       });
     } else {
       // Split long geometry into analysable chunks so warnings can point at sections.
-      const chunkSize = 25;
+      const chunkSize = ANALYSIS_CHUNK_VERTICES;
       for (let i = 0; i < coordinates.length - 1; i += chunkSize) {
         const slice = coordinates.slice(i, Math.min(coordinates.length, i + chunkSize + 1));
         if (slice.length < 2) continue;

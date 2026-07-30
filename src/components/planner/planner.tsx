@@ -19,6 +19,7 @@ import { toMapFeatures } from '@/components/map/map-features';
 import { useRightsOfWay, RIGHTS_OF_WAY_MIN_ZOOM } from '@/features/api/hooks';
 import {
   analyseRoute,
+  analyseRoutes,
   downloadGpx,
   generateCircularRoutes,
   planRoute,
@@ -255,22 +256,53 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
   const analyseResults = useCallback(
     async (routes: AnalysedRoute[]) => {
       setAnalysingRouteIds(new Set(routes.map((item) => item.route.id)));
-      const analysed: AnalysedRoute[] = [];
+      const target = unitToMetres(store.targetDistance, store.distanceUnit);
 
-      for (const item of routes) {
-        // Keep the route whatever happens: an unanalysed route is still
-        // rideable, and the card says plainly that the figures are unknown.
-        analysed.push(await analyseOne(item));
-        setAnalysingRouteIds((previous) => {
-          const next = new Set(previous);
-          next.delete(item.route.id);
-          return next;
+      try {
+        // One request, one upstream path-data query for all three routes.
+        const response = await analyseRoutes({
+          routes: routes.map((item) => ({
+            id: item.route.id,
+            geometry: {
+              type: 'LineString',
+              coordinates: item.route.geometry.coordinates as Coordinate[],
+            },
+          })),
+          activityProfile: store.activityProfile,
+          accessPolicy: store.accessPolicy,
         });
-      }
 
-      usePlannerStore.getState().setResults(labelAlternatives(analysed));
+        const byId = new Map(response.results.map((result) => [result.id, result]));
+        const analysed = routes.map((item) => {
+          const result = byId.get(item.route.id);
+          if (!result) return item;
+          const merged = { ...item, analysis: result.analysis, elevation: result.elevation };
+          return { ...merged, rationale: describeRoute(merged, target) };
+        });
+        usePlannerStore.getState().setResults(labelAlternatives(analysed));
+      } catch {
+        // Fall back to analysing each route on its own.
+        const analysed: AnalysedRoute[] = [];
+        for (const item of routes) {
+          analysed.push(await analyseOne(item));
+          setAnalysingRouteIds((previous) => {
+            const next = new Set(previous);
+            next.delete(item.route.id);
+            return next;
+          });
+        }
+        usePlannerStore.getState().setResults(labelAlternatives(analysed));
+      } finally {
+        setAnalysingRouteIds(new Set());
+      }
     },
-    [analyseOne],
+    [
+      analyseOne,
+      store.activityProfile,
+      store.accessPolicy,
+      store.targetDistance,
+      store.distanceUnit,
+    ],
   );
 
   /** Manual retry for a single card that came back unanalysed. */

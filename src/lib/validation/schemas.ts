@@ -88,6 +88,23 @@ export const analyseRequestSchema = z.object({
   includeElevation: z.boolean().default(true),
 });
 
+/**
+ * Batch analysis. The alternatives from one generation cover overlapping
+ * ground, so analysing them together means a single upstream path-data query
+ * instead of one per route.
+ */
+export const analyseBatchSchema = z.object({
+  routes: z
+    .array(z.object({ id: z.string().min(1).max(120), geometry: lineStringSchema }))
+    .min(1)
+    .max(5),
+  activityProfile: activityProfileSchema,
+  accessPolicy: accessPolicySchema.default('permit-uncertain'),
+  includeElevation: z.boolean().default(true),
+});
+
+export type AnalyseBatchInput = z.infer<typeof analyseBatchSchema>;
+
 export const gpxExportSchema = z.object({
   name: z.string().min(1).max(120).default('TrailLoop route'),
   description: z.string().max(500).optional(),
