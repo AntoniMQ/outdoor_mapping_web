@@ -38,6 +38,11 @@ export const circularRequestSchema = preferencesSchema.extend({
   loopDirection: z.enum(['automatic', 'clockwise', 'anticlockwise']).default('automatic'),
   loopShape: z.enum(['compact', 'wide', 'adventure']).default('compact'),
   seed: z.number().int().optional(),
+  /**
+   * Return routes without analysing them. The client then analyses each route
+   * separately, so generation stays fast and reliable at any distance.
+   */
+  deferAnalysis: z.boolean().default(false),
 });
 
 export const pointToPointRequestSchema = preferencesSchema.extend({

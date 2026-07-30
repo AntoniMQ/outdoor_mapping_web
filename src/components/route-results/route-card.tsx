@@ -11,15 +11,17 @@ export function RouteCard({
   onSelect,
   unit = 'km',
   index,
+  analysing = false,
 }: {
   result: AnalysedRoute;
   selected: boolean;
   onSelect: () => void;
   unit?: DistanceUnit;
   index: number;
+  analysing?: boolean;
 }) {
   const { analysis } = result;
-  const unknown = '—';
+  const unknown = analysing ? '…' : '—';
   const pct = (value: number) => (analysis.analysed ? formatPercent(value) : unknown);
   const critical = analysis.warnings.filter((warning) => warning.severity === 'critical');
   const caution = analysis.warnings.filter((warning) => warning.severity === 'caution');
@@ -84,7 +86,9 @@ export function RouteCard({
             Surface data {formatPercent(analysis.coverage.surfaceDataPercent)}
           </Badge>
         ) : (
-          <Badge tone="caution">Not analysed</Badge>
+          <Badge tone={analysing ? 'info' : 'caution'}>
+            {analysing ? 'Analysing…' : 'Not analysed'}
+          </Badge>
         )}
         {critical.length > 0 ? (
           <Badge tone="critical">{critical.length} critical warning(s)</Badge>

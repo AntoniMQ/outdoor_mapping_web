@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { CircularRouteRequest, NormalisedRoute } from '@/types/domain';
+import type { AnalysedRoute, CircularRouteRequest, NormalisedRoute } from '@/types/domain';
 import {
   generateAnchorCandidates,
   baseRadiusMetres,
   rescaleCandidate,
 } from '@/features/circular-routing/anchors';
 import { dedupeRoutes, routeOverlap, routeSignature } from '@/features/circular-routing/dedupe';
+import { labelAlternatives } from '@/features/circular-routing/labels';
 import {
   accessConfidenceScore,
   climbingFitScore,
@@ -288,5 +289,81 @@ describe('distance scaling', () => {
     expect(distanceScaleFactor(80_000)).toBeLessThan(1);
     expect(distanceScaleFactor(100_000)).toBeLessThan(distanceScaleFactor(80_000));
     expect(distanceScaleFactor(200_000)).toBeGreaterThan(0.3);
+  });
+});
+
+describe('alternative labelling', () => {
+  const base: AnalysedRoute = {
+    route: makeRoute('x', [
+      [-0.5, 51.65],
+      [-0.49, 51.65],
+    ]),
+    analysis: {
+      distanceMetres: 25_000,
+      durationSeconds: 7_200,
+      ascentMetres: 300,
+      descentMetres: 300,
+      hasElevationData: true,
+      analysed: true,
+      surface: { pavedPercent: 40, unpavedPercent: 40, unknownPercent: 20, offRoadPercent: 50 },
+      designation: {
+        publicFootpathPercent: 0,
+        publicBridlewayPercent: 30,
+        restrictedBywayPercent: 0,
+        bywayOpenToAllTrafficPercent: 0,
+        permissivePercent: 0,
+        roadPercent: 50,
+        otherPercent: 20,
+      },
+      access: {
+        confirmedPercent: 70,
+        permissivePercent: 0,
+        uncertainPercent: 30,
+        notConfirmedPercent: 0,
+        prohibitedPercent: 0,
+      },
+      coverage: { accessDataPercent: 80, surfaceDataPercent: 70, technicalDataPercent: 10 },
+      repeatedPercent: 5,
+      warnings: [],
+      jurisdiction: 'england-wales' as const,
+      matchedDistanceMetres: 20_000,
+      isSyntheticData: false,
+    },
+  };
+
+  it('labels the three headline options once analysis is available', () => {
+    const routes = [
+      {
+        ...base,
+        score: 0.5,
+        analysis: { ...base.analysis, surface: { ...base.analysis.surface, offRoadPercent: 90 } },
+      },
+      { ...base, score: 0.9 },
+      {
+        ...base,
+        score: 0.2,
+        analysis: {
+          ...base.analysis,
+          ascentMetres: 50,
+          access: { ...base.analysis.access, confirmedPercent: 95, uncertainPercent: 5 },
+        },
+      },
+    ];
+    const labelled = labelAlternatives(routes);
+    expect(labelled.map((route) => route.label)).toEqual([
+      'Most off-road',
+      'Balanced',
+      'Easier / lower risk',
+    ]);
+  });
+
+  it('uses neutral labels when routes have not been analysed', () => {
+    const routes = [
+      { ...base, analysis: { ...base.analysis, analysed: false } },
+      { ...base, analysis: { ...base.analysis, analysed: false } },
+    ];
+    const labelled = labelAlternatives(routes);
+    expect(labelled.map((route) => route.label)).toEqual(['Option 1', 'Option 2']);
+    expect(labelled.every((route) => route.labelKey === undefined)).toBe(true);
   });
 });

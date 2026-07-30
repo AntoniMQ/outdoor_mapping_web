@@ -44,6 +44,8 @@ export interface RouteListResponse {
   routes: AnalysedRoute[];
   provider: string;
   isSyntheticData: boolean;
+  /** True when the caller must analyse each route separately. */
+  analysisDeferred?: boolean;
   requestId: string;
 }
 

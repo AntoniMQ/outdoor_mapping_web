@@ -14,6 +14,7 @@ import type {
 } from '@/types/domain';
 import { unitToMetres } from '@/lib/format';
 import { combinedGeometry } from '@/features/manual-routing/reducer';
+import { labelAlternatives } from '@/features/circular-routing/labels';
 import { toMapFeatures } from '@/components/map/map-features';
 import { useRightsOfWay, RIGHTS_OF_WAY_MIN_ZOOM } from '@/features/api/hooks';
 import {
@@ -52,6 +53,7 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
   });
   const [manualResult, setManualResult] = useState<AnalysedRoute | null>(null);
   const [manualBusy, setManualBusy] = useState(false);
+  const [analysingRouteIds, setAnalysingRouteIds] = useState<Set<string>>(new Set());
   const [fitKey, setFitKey] = useState<string | undefined>(undefined);
   const generationAbort = useRef<AbortController | null>(null);
   const analysisAbort = useRef<AbortController | null>(null);
@@ -213,6 +215,45 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manualSignature, planningMode, store.accessPolicy]);
 
+  /**
+   * Analyses generated routes one request at a time. Each analysis gets its own
+   * request budget, so a slow path-data lookup degrades one card rather than
+   * failing the whole generation.
+   */
+  const analyseResults = useCallback(
+    async (routes: AnalysedRoute[]) => {
+      setAnalysingRouteIds(new Set(routes.map((item) => item.route.id)));
+      const analysed: AnalysedRoute[] = [];
+
+      for (const item of routes) {
+        try {
+          const response = await analyseRoute({
+            geometry: {
+              type: 'LineString',
+              coordinates: item.route.geometry.coordinates as Coordinate[],
+            },
+            activityProfile: store.activityProfile,
+            accessPolicy: store.accessPolicy,
+          });
+          analysed.push({ ...item, analysis: response.analysis, elevation: response.elevation });
+        } catch {
+          // Keep the route: an unanalysed route is still rideable, and the card
+          // already says the figures are unknown.
+          analysed.push(item);
+        } finally {
+          setAnalysingRouteIds((previous) => {
+            const next = new Set(previous);
+            next.delete(item.route.id);
+            return next;
+          });
+        }
+      }
+
+      usePlannerStore.getState().setResults(labelAlternatives(analysed));
+    },
+    [store.activityProfile, store.accessPolicy],
+  );
+
   /* ------------------------------------------------------------- generation */
   const disabledReason = useMemo(() => {
     if (planningMode !== 'automatic') return null;
@@ -252,6 +293,9 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
                 targetDistanceMetres: targetMetres,
                 loopDirection: store.loopDirection,
                 loopShape: store.loopShape,
+                // Routes come back immediately; analysis follows per route, so
+                // generation stays reliable however long the loops are.
+                deferAnalysis: true,
               },
               controller.signal,
             )
@@ -280,6 +324,7 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
 
       store.setResults(response.routes);
       setFitKey(`${Date.now()}`);
+      if (response.analysisDeferred) void analyseResults(response.routes);
     } catch (error) {
       store.set(
         'generationError',
@@ -290,7 +335,7 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
     } finally {
       store.set('isGenerating', false);
     }
-  }, [disabledReason, routeType, store]);
+  }, [disabledReason, routeType, store, analyseResults]);
 
   /* ------------------------------------------------------------ map wiring */
   const selectedResult =
@@ -553,6 +598,11 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
         <div aria-live="polite" className="mb-2 text-xs text-[var(--color-ink-muted)]">
           {store.isGenerating ? <Spinner label="Generating route options…" /> : null}
           {manualBusy ? <Spinner label="Analysing route…" /> : null}
+          {analysingRouteIds.size > 0 ? (
+            <Spinner
+              label={`Analysing ${analysingRouteIds.size} route(s) against mapped path data…`}
+            />
+          ) : null}
           {store.generationError ? (
             <span role="alert" className="text-red-600" data-testid="generation-error">
               {store.generationError}
@@ -578,6 +628,7 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
                 key={result.route.id}
                 result={result}
                 index={index}
+                analysing={analysingRouteIds.has(result.route.id)}
                 unit={store.distanceUnit}
                 selected={result.route.id === selectedResult?.route.id}
                 onSelect={() => {

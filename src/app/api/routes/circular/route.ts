@@ -42,10 +42,13 @@ export async function POST(request: Request) {
         provider.maxCandidateCount ?? Number.MAX_SAFE_INTEGER,
       ),
       deadlineAt,
+      deferAnalysis: body.deferAnalysis,
     });
 
-    // Elevation is a nice-to-have: never let it push the request past its budget.
-    const elevationProvider = Date.now() < deadlineAt + 6_000 ? getElevationProvider() : null;
+    // Elevation is a nice-to-have: never let it push the request past its
+    // budget, and skip it entirely when the client will analyse separately.
+    const elevationProvider =
+      body.deferAnalysis || Date.now() >= deadlineAt + 6_000 ? null : getElevationProvider();
     const withElevation = await Promise.all(
       candidates.map(async (candidate) => {
         if (!elevationProvider) return candidate;
@@ -80,6 +83,7 @@ export async function POST(request: Request) {
         routes: withElevation,
         provider: provider.name,
         isSyntheticData: provider.isSynthetic,
+        analysisDeferred: body.deferAnalysis,
         requestId,
       },
       { headers: { 'x-request-id': requestId } },

@@ -50,6 +50,12 @@ export interface RoutingContext {
   candidateCount?: number;
   /** Absolute time (ms since epoch) after which generation must stop and return. */
   deadlineAt?: number;
+  /**
+   * Skip inline analysis. The caller takes responsibility for analysing the
+   * returned routes separately, which keeps generation fast and predictable
+   * however long the routes are.
+   */
+  deferAnalysis?: boolean;
 }
 
 export function requireCoordinates(coordinates: Coordinate[]): void {

@@ -1,8 +1,7 @@
 import type {
+  AnalysedRoute,
   RightsOfWayCollection,
   RouteWarningCode,
-  AnalysedRoute,
-  CandidateLabelKey,
   CircularRouteRequest,
   Coordinate,
   NormalisedRoute,
@@ -35,6 +34,7 @@ import {
   uniquenessScore,
 } from '@/features/circular-routing/scoring';
 import { dedupeRoutes } from '@/features/circular-routing/dedupe';
+import { labelAlternatives } from '@/features/circular-routing/labels';
 import { isHighStressRoad } from '@/features/rights-of-way/access-policy';
 import { getRoutingProvider } from '@/server/providers/routing';
 import { getRightsOfWayProvider } from '@/server/providers/osm';
@@ -152,13 +152,14 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
     // Analysis needs upstream path data, the slowest remaining step. If too
     // little budget is left, skip it and say so rather than running past the
     // platform's function timeout and returning nothing at all.
-    const analysisPossible = this.timeRemaining(budget) > ANALYSIS_MINIMUM_MS;
+    const analysisPossible =
+      !context.deferAnalysis && this.timeRemaining(budget) > ANALYSIS_MINIMUM_MS;
     const sharedFeatures = analysisPossible
       ? await this.loadSharedFeatures(distinct, context)
       : undefined;
     const analysisAffordable = analysisPossible && this.timeRemaining(budget) > 4_000;
 
-    if (!analysisAffordable) {
+    if (!analysisAffordable && !context.deferAnalysis) {
       logger.warn('Skipped route analysis to stay inside the time budget', {
         requestId: context.requestId,
         candidates: distinct.length,
@@ -214,7 +215,9 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
 
     if (passed.length > 0) {
       passed.sort((a, b) => b.score - a.score);
-      return selectAlternatives(passed);
+      return labelAlternatives(
+        dedupeRoutes(passed, 0.62).kept.slice(0, 3),
+      ) as CircularRouteCandidate[];
     }
 
     // Nothing cleared every constraint. Returning the closest attempts with an
@@ -251,7 +254,9 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
       },
     }));
 
-    return selectAlternatives(salvaged);
+    return labelAlternatives(
+      dedupeRoutes(salvaged, 0.62).kept.slice(0, 3),
+    ) as CircularRouteCandidate[];
   }
 
   private timeRemaining(budget: GenerationBudget): number {
@@ -558,52 +563,6 @@ export function polygonAreaSqMetres(coordinates: readonly Coordinate[]): number 
     sum += a[0] * mPerDegLon * (b[1] * mPerDegLat) - b[0] * mPerDegLon * (a[1] * mPerDegLat);
   }
   return Math.abs(sum) / 2;
-}
-
-const LABELS: Record<CandidateLabelKey, string> = {
-  'most-off-road': 'Most off-road',
-  balanced: 'Balanced',
-  easier: 'Easier / lower risk',
-};
-
-/**
- * Picks three meaningfully different options rather than three copies of the
- * top-scoring geometry.
- */
-export function selectAlternatives(candidates: CircularRouteCandidate[]): CircularRouteCandidate[] {
-  if (candidates.length === 0) return [];
-  const remaining = [...candidates];
-  const chosen: CircularRouteCandidate[] = [];
-
-  const take = (
-    labelKey: CandidateLabelKey,
-    compare: (a: CircularRouteCandidate, b: CircularRouteCandidate) => number,
-  ) => {
-    if (remaining.length === 0) return;
-    remaining.sort(compare);
-    const pick = remaining.shift()!;
-    chosen.push({ ...pick, label: LABELS[labelKey], labelKey });
-  };
-
-  take(
-    'most-off-road',
-    (a, b) => b.analysis.surface.offRoadPercent - a.analysis.surface.offRoadPercent,
-  );
-  take('balanced', (a, b) => b.score - a.score);
-  take('easier', (a, b) => easeScore(b) - easeScore(a));
-
-  return chosen;
-}
-
-function easeScore(candidate: CircularRouteCandidate): number {
-  const climbPerKm =
-    candidate.analysis.ascentMetres / Math.max(1, candidate.analysis.distanceMetres / 1000);
-  return (
-    candidate.analysis.access.confirmedPercent / 100 +
-    candidate.analysis.coverage.accessDataPercent / 200 -
-    climbPerKm / 60 -
-    candidate.analysis.access.uncertainPercent / 200
-  );
 }
 
 let generator: CircularRouteGenerator | null = null;

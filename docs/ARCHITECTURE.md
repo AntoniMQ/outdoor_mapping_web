@@ -33,6 +33,20 @@ POST /api/routes/circular
       └── ElevationProvider.getProfile() per candidate
 ```
 
+## Deferred analysis
+
+Routing and analysis have very different costs, so the planner does not force them into one request:
+
+1. `POST /api/routes/circular` with `deferAnalysis: true` returns geometry only — fast and predictable at any distance.
+2. The client renders the routes immediately, then calls `POST /api/routes/analyse` once per route.
+3. Each analysis gets its own request budget, so a slow path-data lookup degrades one card rather than failing the
+   whole generation.
+4. Headline labels ("Most off-road", "Balanced", "Easier / lower risk") are applied by
+   `features/circular-routing/labels.ts` once analysis lands. Until then the options are numbered, because those
+   labels are claims about data nobody has looked at yet.
+
+The same module labels routes when analysis runs inline, so behaviour is identical either way.
+
 ## Provider abstraction
 
 Every external dependency is an interface with at least two implementations — a live adapter and a deterministic
