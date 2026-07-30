@@ -104,6 +104,19 @@ interface OverpassWay {
 export interface OverpassResponse {
   elements?: OverpassWay[];
   osm3s?: { timestamp_osm_base?: string };
+  /** Overpass reports query timeouts and overload in-band, with HTTP 200. */
+  remark?: string;
+}
+
+/**
+ * Overpass signals "query timed out" or "out of memory" as a `remark` on an
+ * otherwise successful response. Treating that as an empty result is how a
+ * route silently ends up reported as 100% uncertain, so it must be an error.
+ */
+export function overpassRemarkError(response: OverpassResponse): string | null {
+  const remark = response.remark?.trim();
+  if (!remark) return null;
+  return /timed out|out of memory|runtime error/i.test(remark) ? remark : null;
 }
 
 export function pickRetainedTags(tags: Record<string, string> | undefined): OsmPathTags {

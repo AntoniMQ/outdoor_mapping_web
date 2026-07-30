@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import type {
-  ActivityProfile,
   Coordinate,
   NormalisedRoute,
   NormalisedRouteSegment,
+  RoutePreferences,
 } from '@/types/domain';
 import { ApiError } from '@/lib/http/api-error';
 import { fetchJson } from '@/lib/http/fetch-json';
@@ -41,59 +41,75 @@ const responseSchema = z.object({
 });
 
 /**
- * Valhalla costing options per activity. `bicycle_type` is Valhalla's own
- * enumeration and maps cleanly onto TrailLoop's profiles, so unlike the
- * openrouteservice adapter nothing has to be approximated.
+ * Valhalla costing per activity *and* per stated preference.
+ *
+ * `bicycle_type` maps TrailLoop's activities exactly, and the user's off-road,
+ * surface and climbing preferences are folded into the numeric weights — a
+ * request to maximise off-road has to reach the engine, or it is not a
+ * preference at all.
+ *
+ * Valhalla semantics: use_roads 0 = avoid roads entirely, 1 = prefer them;
+ * avoid_bad_surfaces 0 = happy on rough ground, 1 = avoid it; use_hills 0 =
+ * avoid climbing, 1 = seek it out.
  */
-function costingFor(profile: ActivityProfile): {
+export function costingFor(preferences: RoutePreferences): {
   costing: string;
   costing_options: Record<string, unknown>;
 } {
-  switch (profile) {
-    case 'mtb':
-      return {
-        costing: 'bicycle',
-        costing_options: {
-          bicycle: {
-            bicycle_type: 'Mountain',
-            use_roads: 0.2,
-            use_hills: 0.6,
-            avoid_bad_surfaces: 0.05,
-          },
+  const { activityProfile, offRoad, surface, climbing } = preferences;
+
+  if (activityProfile === 'hiking') {
+    return {
+      costing: 'pedestrian',
+      costing_options: {
+        pedestrian: {
+          walking_speed: 4.5,
+          use_hills: climbing === 'low' ? 0.2 : climbing === 'high' ? 0.9 : 0.5,
+          walkway_factor: offRoad === 'minimise' ? 0.8 : 1.4,
+          driveway_factor: 5,
         },
-      };
-    case 'gravel':
-      return {
-        costing: 'bicycle',
-        costing_options: {
-          bicycle: {
-            bicycle_type: 'Cross',
-            use_roads: 0.4,
-            use_hills: 0.5,
-            avoid_bad_surfaces: 0.25,
-          },
-        },
-      };
-    case 'road':
-      return {
-        costing: 'bicycle',
-        costing_options: {
-          bicycle: {
-            bicycle_type: 'Road',
-            use_roads: 0.7,
-            use_hills: 0.4,
-            avoid_bad_surfaces: 0.9,
-          },
-        },
-      };
-    case 'hiking':
-      return {
-        costing: 'pedestrian',
-        costing_options: {
-          pedestrian: { walking_speed: 4.5, use_hills: 0.5, walkway_factor: 1.2 },
-        },
-      };
+      },
+    };
   }
+
+  const bicycleType =
+    activityProfile === 'mtb' ? 'Mountain' : activityProfile === 'gravel' ? 'Cross' : 'Road';
+
+  // Baseline road appetite per activity, then shifted by the explicit preference.
+  const baseUseRoads =
+    activityProfile === 'mtb' ? 0.25 : activityProfile === 'gravel' ? 0.45 : 0.75;
+  const useRoads = clamp01(
+    baseUseRoads + (offRoad === 'maximise' ? -0.2 : offRoad === 'minimise' ? 0.25 : 0),
+  );
+
+  const baseAvoidBadSurfaces =
+    activityProfile === 'mtb' ? 0.05 : activityProfile === 'gravel' ? 0.25 : 0.85;
+  const avoidBadSurfaces = clamp01(
+    baseAvoidBadSurfaces +
+      (surface === 'prefer-paved' ? 0.3 : surface === 'prefer-unpaved' ? -0.2 : 0) +
+      (offRoad === 'maximise' ? -0.1 : 0),
+  );
+
+  const useHills = clamp01(climbing === 'low' ? 0.15 : climbing === 'high' ? 0.9 : 0.5);
+
+  return {
+    costing: 'bicycle',
+    costing_options: {
+      bicycle: {
+        bicycle_type: bicycleType,
+        use_roads: useRoads,
+        use_hills: useHills,
+        avoid_bad_surfaces: avoidBadSurfaces,
+        // Nudge the engine towards mapped cycle infrastructure and tracks when
+        // the rider asked to stay off the road network.
+        use_living_streets: offRoad === 'maximise' ? 0.8 : 0.5,
+      },
+    },
+  };
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, Number(value.toFixed(2))));
 }
 
 export interface ValhallaOptions {
@@ -123,7 +139,7 @@ export class ValhallaRoutingProvider implements RoutingProvider {
       throw new ApiError('BAD_REQUEST', 'At least two coordinates are required.');
     }
 
-    const { costing, costing_options } = costingFor(request.preferences.activityProfile);
+    const { costing, costing_options } = costingFor(request.preferences);
     const url = `${this.options.baseUrl.replace(/\/$/, '')}/route`;
     const alternates = Math.max(0, Math.min(2, (request.alternatives ?? 1) - 1));
 

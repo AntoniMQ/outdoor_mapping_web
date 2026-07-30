@@ -71,11 +71,23 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
     const jurisdiction = context.jurisdiction ?? inferJurisdiction(coordinates[0] ?? [0, 0]);
 
     const provider = getRightsOfWayProvider();
+    // A corridor must be sampled at least as densely as its own width or gaps
+    // open up between the sample circles. Widening the corridor for longer
+    // routes keeps the point count — and therefore the query cost — bounded.
+    const corridorMetres = Math.min(
+      200,
+      Math.max(60, Math.round((route.distanceMetres / 1000) * 3)),
+    );
+    const corridorPoints = Math.min(
+      400,
+      Math.max(40, Math.ceil(route.distanceMetres / (corridorMetres * 2))),
+    );
     const queryOptions = {
       jurisdiction,
       signal: context.signal,
       limit: 6_000,
       includeRoads: true,
+      corridorMetres,
       requestId: context.requestId,
     };
 
@@ -85,7 +97,7 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
       context.features ??
       (await (
         provider.getFeaturesAlongRoutes
-          ? provider.getFeaturesAlongRoutes([downsample(coordinates, 300)], queryOptions)
+          ? provider.getFeaturesAlongRoutes([downsample(coordinates, corridorPoints)], queryOptions)
           : provider.getFeatures(padBoundingBox(route.bbox, 150), queryOptions)
       ).catch(() => ({ type: 'FeatureCollection' as const, features: [] })));
 

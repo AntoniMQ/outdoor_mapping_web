@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildOverpassCorridorQuery,
   buildOverpassQuery,
+  overpassRemarkError,
   overpassToFeatureCollection,
   pickRetainedTags,
   type OverpassResponse,
@@ -152,5 +153,29 @@ describe('corridor queries', () => {
     ]);
     const query = buildOverpassCorridorQuery(coordinates);
     expect(query.length).toBeLessThan(12_000);
+  });
+});
+
+describe('Overpass in-band failures', () => {
+  it('treats a timeout remark as an error, not an empty result', () => {
+    expect(
+      overpassRemarkError({ remark: 'runtime error: Query timed out in "query" at line 3' }),
+    ).toMatch(/timed out/i);
+    expect(overpassRemarkError({ remark: 'runtime error: Query run out of memory' })).toBeTruthy();
+  });
+
+  it('ignores harmless remarks', () => {
+    expect(overpassRemarkError({ remark: 'considered 12 elements' })).toBeNull();
+    expect(overpassRemarkError({ elements: [] })).toBeNull();
+  });
+
+  it('produces a real multi-line query', () => {
+    const query = buildOverpassCorridorQuery([
+      [-0.52, 51.65],
+      [-0.5, 51.66],
+    ]);
+    // A literal backslash-n here would be an Overpass syntax error.
+    expect(query).not.toContain(String.raw`\n`);
+    expect(query.split('\n').length).toBeGreaterThan(3);
   });
 });

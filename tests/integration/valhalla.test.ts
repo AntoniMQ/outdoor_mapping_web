@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ValhallaRoutingProvider } from '@/server/providers/routing/valhalla';
+import { costingFor, ValhallaRoutingProvider } from '@/server/providers/routing/valhalla';
 import { decodePolyline } from '@/lib/geo/polyline';
 import { defaultPreferences } from '@/features/routing/profiles';
 
@@ -208,5 +208,64 @@ describe('time-bound calls', () => {
     ).rejects.toMatchObject({ code: 'UPSTREAM_UNAVAILABLE' });
 
     expect(attempts).toBe(2);
+  });
+});
+
+describe('preferences reach the engine', () => {
+  it('lowers use_roads when the rider asks to maximise off-road', () => {
+    const balanced = costingFor(defaultPreferences('gravel'));
+    const offRoad = costingFor({ ...defaultPreferences('gravel'), offRoad: 'maximise' });
+    const onRoad = costingFor({ ...defaultPreferences('gravel'), offRoad: 'minimise' });
+
+    const useRoads = (result: ReturnType<typeof costingFor>) =>
+      (result.costing_options.bicycle as { use_roads: number }).use_roads;
+
+    expect(useRoads(offRoad)).toBeLessThan(useRoads(balanced));
+    expect(useRoads(onRoad)).toBeGreaterThan(useRoads(balanced));
+  });
+
+  it('follows the surface preference', () => {
+    const avoid = (result: ReturnType<typeof costingFor>) =>
+      (result.costing_options.bicycle as { avoid_bad_surfaces: number }).avoid_bad_surfaces;
+
+    expect(
+      avoid(costingFor({ ...defaultPreferences('gravel'), surface: 'prefer-paved' })),
+    ).toBeGreaterThan(
+      avoid(costingFor({ ...defaultPreferences('gravel'), surface: 'prefer-unpaved' })),
+    );
+  });
+
+  it('follows the climbing preference for both cycling and walking', () => {
+    const hills = (result: ReturnType<typeof costingFor>) =>
+      (
+        (result.costing_options.bicycle ?? result.costing_options.pedestrian) as {
+          use_hills: number;
+        }
+      ).use_hills;
+
+    expect(hills(costingFor({ ...defaultPreferences('mtb'), climbing: 'high' }))).toBeGreaterThan(
+      hills(costingFor({ ...defaultPreferences('mtb'), climbing: 'low' })),
+    );
+    expect(
+      hills(costingFor({ ...defaultPreferences('hiking'), climbing: 'high' })),
+    ).toBeGreaterThan(hills(costingFor({ ...defaultPreferences('hiking'), climbing: 'low' })));
+  });
+
+  it('keeps every weight inside Valhalla’s 0-1 range', () => {
+    for (const activity of ['mtb', 'gravel', 'road', 'hiking'] as const) {
+      for (const offRoad of ['maximise', 'balanced', 'minimise'] as const) {
+        for (const surface of ['prefer-paved', 'prefer-unpaved', 'no-preference'] as const) {
+          const result = costingFor({ ...defaultPreferences(activity), offRoad, surface });
+          const options = (result.costing_options.bicycle ??
+            result.costing_options.pedestrian) as Record<string, unknown>;
+          for (const [key, value] of Object.entries(options)) {
+            if (typeof value !== 'number' || key === 'walking_speed' || key.endsWith('_factor'))
+              continue;
+            expect(value).toBeGreaterThanOrEqual(0);
+            expect(value).toBeLessThanOrEqual(1);
+          }
+        }
+      }
+    }
   });
 });
