@@ -255,3 +255,40 @@ describe('RightsOfWayLegend', () => {
     expect(screen.queryByText('Public footpath')).not.toBeInTheDocument();
   });
 });
+
+describe('analysis retry', () => {
+  const unanalysed: AnalysedRoute = {
+    ...analysedRoute,
+    analysis: { ...analysedRoute.analysis, analysed: false },
+  };
+
+  it('offers a retry when analysis did not complete', async () => {
+    const onRetry = vi.fn();
+    render(
+      <RouteCard
+        result={unanalysed}
+        index={0}
+        selected={false}
+        onSelect={() => {}}
+        onRetryAnalysis={onRetry}
+      />,
+    );
+    await userEvent.click(screen.getByTestId('retry-analysis-0'));
+    expect(onRetry).toHaveBeenCalled();
+  });
+
+  it('shows progress instead of a retry while analysis is running', () => {
+    render(
+      <RouteCard
+        result={unanalysed}
+        index={0}
+        selected={false}
+        onSelect={() => {}}
+        analysing
+        onRetryAnalysis={() => {}}
+      />,
+    );
+    expect(screen.getByText('Analysing…')).toBeInTheDocument();
+    expect(screen.queryByTestId('retry-analysis-0')).not.toBeInTheDocument();
+  });
+});

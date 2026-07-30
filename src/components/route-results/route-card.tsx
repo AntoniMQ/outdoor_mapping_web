@@ -12,6 +12,7 @@ export function RouteCard({
   unit = 'km',
   index,
   analysing = false,
+  onRetryAnalysis,
 }: {
   result: AnalysedRoute;
   selected: boolean;
@@ -19,6 +20,7 @@ export function RouteCard({
   unit?: DistanceUnit;
   index: number;
   analysing?: boolean;
+  onRetryAnalysis?: () => void;
 }) {
   const { analysis } = result;
   const unknown = analysing ? '…' : '—';
@@ -85,10 +87,22 @@ export function RouteCard({
           <Badge tone="neutral">
             Surface data {formatPercent(analysis.coverage.surfaceDataPercent)}
           </Badge>
+        ) : analysing ? (
+          <Badge tone="info">Analysing…</Badge>
         ) : (
-          <Badge tone={analysing ? 'info' : 'caution'}>
-            {analysing ? 'Analysing…' : 'Not analysed'}
-          </Badge>
+          <>
+            <Badge tone="caution">Not analysed</Badge>
+            {onRetryAnalysis ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onRetryAnalysis}
+                data-testid={`retry-analysis-${index}`}
+              >
+                Retry analysis
+              </Button>
+            ) : null}
+          </>
         )}
         {critical.length > 0 ? (
           <Badge tone="critical">{critical.length} critical warning(s)</Badge>

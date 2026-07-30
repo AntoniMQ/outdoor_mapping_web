@@ -220,12 +220,9 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
    * request budget, so a slow path-data lookup degrades one card rather than
    * failing the whole generation.
    */
-  const analyseResults = useCallback(
-    async (routes: AnalysedRoute[]) => {
-      setAnalysingRouteIds(new Set(routes.map((item) => item.route.id)));
-      const analysed: AnalysedRoute[] = [];
-
-      for (const item of routes) {
+  const analyseOne = useCallback(
+    async (item: AnalysedRoute, attempts = 2): Promise<AnalysedRoute> => {
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
         try {
           const response = await analyseRoute({
             geometry: {
@@ -235,23 +232,58 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
             activityProfile: store.activityProfile,
             accessPolicy: store.accessPolicy,
           });
-          analysed.push({ ...item, analysis: response.analysis, elevation: response.elevation });
+          return { ...item, analysis: response.analysis, elevation: response.elevation };
         } catch {
-          // Keep the route: an unanalysed route is still rideable, and the card
-          // already says the figures are unknown.
-          analysed.push(item);
-        } finally {
-          setAnalysingRouteIds((previous) => {
-            const next = new Set(previous);
-            next.delete(item.route.id);
-            return next;
-          });
+          // Upstream path data is slow and occasionally times out; one retry
+          // clears most of it. The cached result makes the retry cheap.
+          if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 1_200));
         }
+      }
+      return item;
+    },
+    [store.activityProfile, store.accessPolicy],
+  );
+
+  const analyseResults = useCallback(
+    async (routes: AnalysedRoute[]) => {
+      setAnalysingRouteIds(new Set(routes.map((item) => item.route.id)));
+      const analysed: AnalysedRoute[] = [];
+
+      for (const item of routes) {
+        // Keep the route whatever happens: an unanalysed route is still
+        // rideable, and the card says plainly that the figures are unknown.
+        analysed.push(await analyseOne(item));
+        setAnalysingRouteIds((previous) => {
+          const next = new Set(previous);
+          next.delete(item.route.id);
+          return next;
+        });
       }
 
       usePlannerStore.getState().setResults(labelAlternatives(analysed));
     },
-    [store.activityProfile, store.accessPolicy],
+    [analyseOne],
+  );
+
+  /** Manual retry for a single card that came back unanalysed. */
+  const retryAnalysis = useCallback(
+    async (routeId: string) => {
+      const current = usePlannerStore.getState().results;
+      const target = current.find((item) => item.route.id === routeId);
+      if (!target) return;
+      setAnalysingRouteIds((previous) => new Set(previous).add(routeId));
+      const updated = await analyseOne(target, 1);
+      setAnalysingRouteIds((previous) => {
+        const next = new Set(previous);
+        next.delete(routeId);
+        return next;
+      });
+      const merged = usePlannerStore
+        .getState()
+        .results.map((item) => (item.route.id === routeId ? updated : item));
+      usePlannerStore.getState().setResults(labelAlternatives(merged));
+    },
+    [analyseOne],
   );
 
   /* ------------------------------------------------------------- generation */
@@ -629,6 +661,7 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
                 result={result}
                 index={index}
                 analysing={analysingRouteIds.has(result.route.id)}
+                onRetryAnalysis={() => void retryAnalysis(result.route.id)}
                 unit={store.distanceUnit}
                 selected={result.route.id === selectedResult?.route.id}
                 onSelect={() => {

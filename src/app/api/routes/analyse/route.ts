@@ -9,9 +9,15 @@ import { boundingBoxOf, lineLengthMetres } from '@/lib/geo/geometry';
 import { getElevationProvider } from '@/server/providers/elevation';
 import { getRouteAnalysisService } from '@/server/services/route-analysis';
 import { getRoutingProvider } from '@/server/providers/routing';
+import { readCache, writeCache } from '@/server/repositories/cache-repository';
+import { hashString } from '@/lib/geo/random';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+const ANALYSIS_CACHE_VERSION = 'v1';
+const ANALYSIS_CACHE_TTL_MS = 60 * 60 * 1000;
 
 /**
  * Analyses arbitrary geometry — used by the manual editor, including hybrid
@@ -30,6 +36,32 @@ export async function POST(request: Request) {
 
     const body = analyseRequestSchema.parse(await readJsonBody(request));
     const coordinates = body.geometry.coordinates as Coordinate[];
+
+    // Analysing the same geometry twice is pure waste: the three alternatives
+    // overlap heavily, and users reselect routes constantly.
+    const cacheKey = [
+      'analyse',
+      ANALYSIS_CACHE_VERSION,
+      body.activityProfile,
+      body.accessPolicy,
+      body.includeElevation ? 'ele' : 'no-ele',
+      hashString(
+        coordinates
+          .filter((_, index) => index % 5 === 0)
+          .map(([lon, lat]) => `${lon.toFixed(4)},${lat.toFixed(4)}`)
+          .join(';'),
+      ).toString(36),
+    ].join('|');
+
+    if (!body.segments?.length) {
+      const cached = await readCache<Record<string, unknown>>(cacheKey);
+      if (cached) {
+        return NextResponse.json(
+          { ...cached.value, cached: true, requestId },
+          { headers: { 'x-request-id': requestId } },
+        );
+      }
+    }
 
     const manualSegmentIndexes: number[] = [...body.manualSegmentIndexes];
     const segments: NormalisedRouteSegment[] = [];
@@ -86,18 +118,33 @@ export async function POST(request: Request) {
       requestId,
     });
 
-    return NextResponse.json(
-      {
-        analysis: {
-          ...analysis,
-          highestPointMetres: elevation?.maxElevationMetres,
-          lowestPointMetres: elevation?.minElevationMetres,
-        },
-        elevation,
-        isSyntheticData: provider.isSynthetic,
-        requestId,
+    const payload = {
+      analysis: {
+        ...analysis,
+        highestPointMetres: elevation?.maxElevationMetres,
+        lowestPointMetres: elevation?.minElevationMetres,
       },
-      { headers: { 'x-request-id': requestId } },
+      elevation,
+      isSyntheticData: provider.isSynthetic,
+    };
+
+    // Only cache complete results: a partially analysed route should be retried,
+    // not remembered.
+    if (!body.segments?.length && analysis.analysed) {
+      await writeCache(
+        cacheKey,
+        'route-analysis',
+        ANALYSIS_CACHE_VERSION,
+        payload,
+        ANALYSIS_CACHE_TTL_MS,
+      );
+    }
+
+    return NextResponse.json(
+      { ...payload, cached: false, requestId },
+      {
+        headers: { 'x-request-id': requestId },
+      },
     );
   } catch (error) {
     return errorResponse(error, requestId);
