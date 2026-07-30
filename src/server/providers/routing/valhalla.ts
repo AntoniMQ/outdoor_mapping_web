@@ -111,8 +111,10 @@ export interface ValhallaOptions {
 export class ValhallaRoutingProvider implements RoutingProvider {
   readonly name = 'valhalla';
   readonly isSynthetic = false;
-  readonly maxConcurrency = 2;
-  readonly maxCandidateCount = 12;
+  // Modest concurrency for a shared community instance, but high enough that a
+  // dozen candidates do not serialise into a timeout.
+  readonly maxConcurrency = 3;
+  readonly maxCandidateCount = 8;
 
   constructor(private readonly options: ValhallaOptions) {}
 
@@ -128,8 +130,10 @@ export class ValhallaRoutingProvider implements RoutingProvider {
     const payload = await fetchJson<unknown>(url, {
       method: 'POST',
       provider: this.name,
-      timeoutMs: this.options.timeoutMs,
-      retries: 1,
+      // A retry doubles the cost of an already slow call, which is the last
+      // thing a time-bound caller wants.
+      timeoutMs: request.timeoutMs ?? this.options.timeoutMs,
+      retries: request.timeoutMs === undefined ? 1 : 0,
       signal: request.signal,
       allowedHosts: [new URL(this.options.baseUrl).host],
       headers: { 'user-agent': this.options.userAgent },

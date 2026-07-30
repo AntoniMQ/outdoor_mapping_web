@@ -119,8 +119,8 @@ export class OpenRouteServiceProvider implements RoutingProvider {
       method: 'POST',
       provider: this.name,
       body,
-      timeoutMs: this.options.timeoutMs,
-      retries: 1,
+      timeoutMs: request.timeoutMs ?? this.options.timeoutMs,
+      retries: request.timeoutMs === undefined ? 1 : 0,
       signal: request.signal,
       allowedHosts: [new URL(this.options.baseUrl).host],
       headers: {

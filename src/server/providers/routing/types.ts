@@ -10,6 +10,11 @@ export interface ProviderRouteRequest {
   requestId?: string;
   /** Deterministic variation hint used by candidate generation. */
   variantSeed?: number;
+  /**
+   * Per-call timeout. Candidate generation sets this from its remaining budget
+   * so one slow upstream call cannot consume the entire request.
+   */
+  timeoutMs?: number;
   /** Ways the caller would rather avoid (used for varied out-and-back returns). */
   avoidWayIds?: number[];
 }

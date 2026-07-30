@@ -287,6 +287,8 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
           variantSeed: index + iteration * 101 + 1,
           signal: context.signal,
           requestId: context.requestId,
+          // Bound each call so the overshoot past the deadline stays small.
+          timeoutMs: Math.max(4_000, Math.min(10_000, Math.round(this.timeRemaining(budget) / 2))),
         });
       } catch (error) {
         budget.failures += 1;

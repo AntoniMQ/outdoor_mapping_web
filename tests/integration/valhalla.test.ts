@@ -134,8 +134,8 @@ describe('ValhallaRoutingProvider', () => {
   });
 
   it('advertises conservative limits for the shared public instance', () => {
-    expect(provider.maxConcurrency).toBeLessThanOrEqual(2);
-    expect(provider.maxCandidateCount).toBeLessThanOrEqual(12);
+    expect(provider.maxConcurrency).toBeLessThanOrEqual(3);
+    expect(provider.maxCandidateCount).toBeLessThanOrEqual(8);
   });
 
   it('maps upstream failures to structured errors', async () => {
@@ -162,5 +162,51 @@ describe('ValhallaRoutingProvider', () => {
         preferences: defaultPreferences('mtb'),
       }),
     ).rejects.toMatchObject({ code: 'UPSTREAM_INVALID_RESPONSE' });
+  });
+});
+
+describe('time-bound calls', () => {
+  it('uses the caller supplied timeout and skips retries', async () => {
+    let attempts = 0;
+    const spy = vi.spyOn(globalThis, 'fetch');
+    spy.mockImplementation(() => {
+      attempts += 1;
+      return Promise.resolve(new Response('boom', { status: 503 }));
+    });
+
+    await expect(
+      provider.route({
+        coordinates: [
+          [-0.52, 51.65],
+          [-0.5, 51.66],
+        ],
+        preferences: defaultPreferences('mtb'),
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toMatchObject({ code: 'UPSTREAM_UNAVAILABLE' });
+
+    // One attempt only: a retry would double the cost for a time-bound caller.
+    expect(attempts).toBe(1);
+  });
+
+  it('still retries transient failures when no deadline is imposed', async () => {
+    let attempts = 0;
+    const spy = vi.spyOn(globalThis, 'fetch');
+    spy.mockImplementation(() => {
+      attempts += 1;
+      return Promise.resolve(new Response('boom', { status: 503 }));
+    });
+
+    await expect(
+      provider.route({
+        coordinates: [
+          [-0.52, 51.65],
+          [-0.5, 51.66],
+        ],
+        preferences: defaultPreferences('mtb'),
+      }),
+    ).rejects.toMatchObject({ code: 'UPSTREAM_UNAVAILABLE' });
+
+    expect(attempts).toBe(2);
   });
 });
