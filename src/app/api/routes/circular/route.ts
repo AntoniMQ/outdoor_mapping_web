@@ -27,6 +27,7 @@ export async function POST(request: Request) {
     const provider = getRoutingProvider();
     const generator = getCircularRouteGenerator();
 
+    const deadlineAt = Date.now() + env.ROUTE_GENERATION_BUDGET_MS;
     const candidates = await generator.generate(body, {
       preferences: body,
       provider,
@@ -40,10 +41,11 @@ export async function POST(request: Request) {
         env.CIRCULAR_CANDIDATE_COUNT,
         provider.maxCandidateCount ?? Number.MAX_SAFE_INTEGER,
       ),
-      deadlineAt: Date.now() + env.ROUTE_GENERATION_BUDGET_MS,
+      deadlineAt,
     });
 
-    const elevationProvider = getElevationProvider();
+    // Elevation is a nice-to-have: never let it push the request past its budget.
+    const elevationProvider = Date.now() < deadlineAt + 6_000 ? getElevationProvider() : null;
     const withElevation = await Promise.all(
       candidates.map(async (candidate) => {
         if (!elevationProvider) return candidate;
@@ -56,6 +58,7 @@ export async function POST(request: Request) {
           analysis: elevation
             ? {
                 ...candidate.analysis,
+                hasElevationData: true,
                 ascentMetres: elevation.ascentMetres,
                 descentMetres: elevation.descentMetres,
                 highestPointMetres: elevation.maxElevationMetres,

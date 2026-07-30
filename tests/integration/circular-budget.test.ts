@@ -57,3 +57,20 @@ describe('circular generation budget', () => {
     expect(routes.length).toBeLessThanOrEqual(3);
   });
 });
+
+describe('degraded results instead of failures', () => {
+  it('returns routes with an explicit warning when there is no time to analyse them', async () => {
+    // Enough budget to route, not enough to analyse (analysis needs >12s).
+    const routes = await getCircularRouteGenerator().generate(
+      request,
+      context({ deadlineAt: Date.now() + 6_000, candidateCount: 6 }),
+    );
+    expect(routes.length).toBeGreaterThan(0);
+    const warning = routes[0]!.analysis.warnings.find((item) => item.code === 'LOW_DATA_COVERAGE');
+    expect(warning).toBeDefined();
+    expect(warning!.message).toMatch(/could not be checked against mapped rights-of-way data/i);
+    // Unknown, not zero-and-pretending.
+    expect(routes[0]!.analysis.coverage.accessDataPercent).toBe(0);
+    expect(routes[0]!.analysis.access.uncertainPercent).toBe(100);
+  });
+});

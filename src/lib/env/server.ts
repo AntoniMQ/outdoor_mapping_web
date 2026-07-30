@@ -70,7 +70,7 @@ const serverSchema = z.object({
    * candidates found so far when it expires, rather than exceeding the
    * platform's function timeout and failing with a 504.
    */
-  ROUTE_GENERATION_BUDGET_MS: z.coerce.number().int().min(5_000).max(120_000).default(40_000),
+  ROUTE_GENERATION_BUDGET_MS: z.coerce.number().int().min(5_000).max(120_000).default(35_000),
   CONTACT_EMAIL: z.string().default('trailloop@example.org'),
 });
 

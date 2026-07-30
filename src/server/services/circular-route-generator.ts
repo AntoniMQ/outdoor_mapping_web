@@ -41,6 +41,7 @@ import { getRightsOfWayProvider } from '@/server/providers/osm';
 import type { RoutingContext } from '@/server/providers/routing/types';
 import {
   getRouteAnalysisService,
+  inferJurisdiction,
   type RouteAnalysisResult,
 } from '@/server/services/route-analysis';
 
@@ -63,6 +64,8 @@ const PREFERRED_TOLERANCE = 0.1;
 /** Candidates refined in phase two, and candidates analysed at all. */
 const REFINEMENT_LIMIT = 8;
 const ANALYSIS_LIMIT = 10;
+/** Below this much remaining budget, analysis is skipped entirely. */
+const ANALYSIS_MINIMUM_MS = 12_000;
 const ACCEPTABLE_TOLERANCE = 0.2;
 
 export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
@@ -132,31 +135,51 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
     }
 
     // Deduplicate on geometry before analysis: analysis is the expensive step,
-    // so there is no sense analysing two copies of the same loop.
+    // so there is no sense analysing two copies of the same loop. Long routes
+    // are analysed in smaller numbers because each one costs more.
+    const analysisLimit = Math.max(
+      3,
+      Math.round(ANALYSIS_LIMIT * distanceScaleFactor(request.targetDistanceMetres)),
+    );
     const distinct = dedupeRoutes(
       successes.map((item) => ({ ...item, route: item.route })),
       0.62,
-    ).kept.slice(0, ANALYSIS_LIMIT);
+    ).kept.slice(0, analysisLimit);
 
     // One rights-of-way query for the whole candidate set, rather than one per
     // candidate. With live Overpass data this is the difference between a
     // dozen upstream queries and one.
-    const sharedFeatures = await this.loadSharedFeatures(distinct, context);
+    // Analysis needs upstream path data, the slowest remaining step. If too
+    // little budget is left, skip it and say so rather than running past the
+    // platform's function timeout and returning nothing at all.
+    const analysisPossible = this.timeRemaining(budget) > ANALYSIS_MINIMUM_MS;
+    const sharedFeatures = analysisPossible
+      ? await this.loadSharedFeatures(distinct, context)
+      : undefined;
+    const analysisAffordable = analysisPossible && this.timeRemaining(budget) > 4_000;
 
-    const analysed = await mapWithConcurrency(
-      distinct,
-      Math.max(2, context.concurrency),
-      async (item) => {
-        const analysis = await analysisService.analyse(item.route, {
-          activityProfile: request.activityProfile,
-          accessPolicy: request.accessPolicy,
-          signal: context.signal,
-          requestId: context.requestId,
-          features: sharedFeatures,
-        });
-        return { ...item, analysis };
-      },
-    );
+    if (!analysisAffordable) {
+      logger.warn('Skipped route analysis to stay inside the time budget', {
+        requestId: context.requestId,
+        candidates: distinct.length,
+      });
+    }
+
+    const analysed = analysisAffordable
+      ? await mapWithConcurrency(distinct, Math.max(2, context.concurrency), async (item) => {
+          const analysis = await analysisService.analyse(item.route, {
+            activityProfile: request.activityProfile,
+            accessPolicy: request.accessPolicy,
+            signal: context.signal,
+            requestId: context.requestId,
+            features: sharedFeatures,
+          });
+          return { ...item, analysis };
+        })
+      : distinct.map((item) => ({
+          status: 'fulfilled' as const,
+          value: { ...item, analysis: unanalysedResult(item.route, request) },
+        }));
 
     const passed: CircularRouteCandidate[] = [];
     const rejected: Array<{ candidate: CircularRouteCandidate; reason: RejectionReason }> = [];
@@ -333,10 +356,20 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
     };
 
     if (provider.getFeaturesAlongRoutes) {
-      const corridors = candidates.map((candidate) =>
-        downsample(candidate.route.geometry.coordinates as Coordinate[], 160),
-      );
-      return provider.getFeaturesAlongRoutes(corridors, queryOptions).catch(() => undefined);
+      // Corridor sampling must stay dense relative to its radius or gaps open
+      // up, so long routes use a wider corridor and coarser sampling instead of
+      // an unbounded number of points.
+      const longest = Math.max(...candidates.map((candidate) => candidate.route.distanceMetres));
+      const corridorMetres = Math.min(150, Math.max(35, Math.round(longest / 900)));
+      const pointsPerRoute = Math.min(400, Math.max(60, Math.ceil(longest / (corridorMetres * 2))));
+      const corridors = candidates
+        .slice(0, 6)
+        .map((candidate) =>
+          downsample(candidate.route.geometry.coordinates as Coordinate[], pointsPerRoute),
+        );
+      return provider
+        .getFeaturesAlongRoutes(corridors, { ...queryOptions, corridorMetres })
+        .catch(() => undefined);
     }
 
     let [minLon, minLat, maxLon, maxLat] = candidates[0]!.route.bbox;
@@ -351,6 +384,59 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
     if (boundingBoxAreaSqKm(bbox) > 1_200) return undefined;
     return provider.getFeatures(bbox, queryOptions).catch(() => undefined);
   }
+}
+
+/**
+ * Used when there was no time left to analyse a route. Everything is reported
+ * as unknown rather than guessed, and a warning explains why.
+ */
+function unanalysedResult(
+  route: NormalisedRoute,
+  request: CircularRouteRequest,
+): RouteAnalysisResult {
+  const zeroed = { pavedPercent: 0, unpavedPercent: 0, unknownPercent: 100, offRoadPercent: 0 };
+  return {
+    distanceMetres: route.distanceMetres,
+    durationSeconds: route.durationSeconds ?? 0,
+    ascentMetres: route.ascentMetres ?? 0,
+    descentMetres: route.descentMetres ?? 0,
+    hasElevationData: route.ascentMetres !== undefined,
+    surface: zeroed,
+    designation: {
+      publicFootpathPercent: 0,
+      publicBridlewayPercent: 0,
+      restrictedBywayPercent: 0,
+      bywayOpenToAllTrafficPercent: 0,
+      permissivePercent: 0,
+      roadPercent: 0,
+      otherPercent: 100,
+    },
+    access: {
+      confirmedPercent: 0,
+      permissivePercent: 0,
+      uncertainPercent: 100,
+      notConfirmedPercent: 0,
+      prohibitedPercent: 0,
+    },
+    coverage: { accessDataPercent: 0, surfaceDataPercent: 0, technicalDataPercent: 0 },
+    repeatedPercent: 0,
+    warnings: [
+      {
+        code: 'LOW_DATA_COVERAGE',
+        severity: 'caution',
+        message:
+          'This route was generated but could not be checked against mapped rights-of-way data in the time available, so access, surface and designation figures are unknown. Try a shorter target distance for full analysis.',
+        affectedDistanceMetres: route.distanceMetres,
+        segmentIndexes: [],
+      },
+    ],
+    jurisdiction: inferJurisdiction(
+      (route.geometry.coordinates as Coordinate[])[0] ?? request.start,
+    ),
+    matchedDistanceMetres: 0,
+    isSyntheticData: route.isSyntheticData,
+    debug: { match: [] },
+  };
 }
 
 interface GenerationBudget {
