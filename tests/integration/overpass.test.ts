@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import {
+  buildOverpassCorridorQuery,
   buildOverpassQuery,
   overpassToFeatureCollection,
   pickRetainedTags,
@@ -126,5 +127,30 @@ describe('road inclusion for analysis', () => {
     const classification = collection.features[0]!.properties.classification;
     expect(classification.cycling.cyclingStatus).toBe('confirmed');
     expect(classification.surfaceClass).toBe('paved');
+  });
+});
+
+describe('corridor queries', () => {
+  it('asks for ways near the route rather than a bounding box', () => {
+    const query = buildOverpassCorridorQuery(
+      [
+        [-0.52, 51.65],
+        [-0.5, 51.66],
+      ],
+      35,
+      25,
+    );
+    expect(query).toContain('(around:35,51.65000,-0.52000,51.66000,-0.50000)');
+    expect(query).toContain('out tags geom;');
+  });
+
+  it('stays compact for a long route', () => {
+    // 300 points is what analysis downsamples a route to, however long it is.
+    const coordinates: Array<[number, number]> = Array.from({ length: 300 }, (_, i) => [
+      -0.52 + i * 0.002,
+      51.65 + i * 0.001,
+    ]);
+    const query = buildOverpassCorridorQuery(coordinates);
+    expect(query.length).toBeLessThan(12_000);
   });
 });

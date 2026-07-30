@@ -18,7 +18,10 @@ import {
   uniquenessScore,
 } from '@/features/circular-routing/scoring';
 import { haversineMetres } from '@/lib/geo/geometry';
-import { polygonAreaSqMetres } from '@/server/services/circular-route-generator';
+import {
+  distanceScaleFactor,
+  polygonAreaSqMetres,
+} from '@/server/services/circular-route-generator';
 
 const request: CircularRouteRequest = {
   start: [-0.5183, 51.6541],
@@ -272,5 +275,18 @@ describe('route deduplication', () => {
     ]);
     const result = dedupeRoutes([{ route: a }, { route: sameLengthDifferentPlace }]);
     expect(result.kept).toHaveLength(2);
+  });
+});
+
+describe('distance scaling', () => {
+  it('keeps the full candidate budget for ordinary loops', () => {
+    expect(distanceScaleFactor(25_000)).toBe(1);
+    expect(distanceScaleFactor(50_000)).toBe(1);
+  });
+
+  it('reduces the budget for long loops so generation stays within its time limit', () => {
+    expect(distanceScaleFactor(80_000)).toBeLessThan(1);
+    expect(distanceScaleFactor(100_000)).toBeLessThan(distanceScaleFactor(80_000));
+    expect(distanceScaleFactor(200_000)).toBeGreaterThan(0.3);
   });
 });

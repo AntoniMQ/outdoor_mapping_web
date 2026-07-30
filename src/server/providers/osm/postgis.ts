@@ -46,6 +46,10 @@ export class PostgisRightsOfWayProvider implements RightsOfWayProvider {
       limit ${limit}
     `) as unknown as Row[];
 
+    return this.toCollection(rows, options);
+  }
+
+  private toCollection(rows: Row[], options: RightsOfWayQueryOptions): RightsOfWayCollection {
     const features: RightsOfWayFeature[] = rows.map((row) => {
       const tags = row.tags_json ?? {};
       const geometry = JSON.parse(row.geometry) as {

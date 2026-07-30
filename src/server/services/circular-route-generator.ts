@@ -11,7 +11,12 @@ import type {
 import { ApiError } from '@/lib/http/api-error';
 import { mapWithConcurrency } from '@/lib/http/fetch-json';
 import { logger } from '@/lib/logging/logger';
-import { boundingBoxAreaSqKm, haversineMetres, padBoundingBox } from '@/lib/geo/geometry';
+import {
+  boundingBoxAreaSqKm,
+  downsample,
+  haversineMetres,
+  padBoundingBox,
+} from '@/lib/geo/geometry';
 import {
   generateAnchorCandidates,
   rescaleCandidate,
@@ -65,7 +70,13 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
     request: CircularRouteRequest,
     context: RoutingContext,
   ): Promise<CircularRouteCandidate[]> {
-    const candidateCount = context.candidateCount ?? 24;
+    // Long loops take proportionally longer per routing call, so fewer
+    // candidates are attempted to stay inside the time budget.
+    const requested = context.candidateCount ?? 24;
+    const candidateCount = Math.max(
+      6,
+      Math.round(requested * distanceScaleFactor(request.targetDistanceMetres)),
+    );
     const deadlineAt = context.deadlineAt ?? Date.now() + 40_000;
     const anchors = generateAnchorCandidates(request, candidateCount);
     const analysisService = getRouteAnalysisService();
@@ -302,12 +313,32 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
     return this.routeCandidate(request, rescaled, 991, context, budget, 0);
   }
 
-  /** Union bounding box of every candidate, queried once. */
+  /**
+   * One query covering every candidate. A corridor around all candidate routes
+   * scales with route length rather than area, so a 100 km loop costs about the
+   * same as a 20 km one; the bounding-box path remains for providers that
+   * cannot do corridor queries, guarded by an area limit.
+   */
   private async loadSharedFeatures(
     candidates: RoutedCandidate[],
     context: RoutingContext,
   ): Promise<RightsOfWayCollection | undefined> {
     if (candidates.length === 0) return undefined;
+    const provider = getRightsOfWayProvider();
+    const queryOptions = {
+      signal: context.signal,
+      limit: 10_000,
+      includeRoads: true,
+      requestId: context.requestId,
+    };
+
+    if (provider.getFeaturesAlongRoutes) {
+      const corridors = candidates.map((candidate) =>
+        downsample(candidate.route.geometry.coordinates as Coordinate[], 160),
+      );
+      return provider.getFeaturesAlongRoutes(corridors, queryOptions).catch(() => undefined);
+    }
+
     let [minLon, minLat, maxLon, maxLat] = candidates[0]!.route.bbox;
     for (const candidate of candidates) {
       const [a, b, c, d] = candidate.route.bbox;
@@ -317,18 +348,8 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
       maxLat = Math.max(maxLat, d);
     }
     const bbox = padBoundingBox([minLon, minLat, maxLon, maxLat], 200);
-
-    // Fall back to per-route queries if the union is too large to ask for at once.
     if (boundingBoxAreaSqKm(bbox) > 1_200) return undefined;
-
-    return getRightsOfWayProvider()
-      .getFeatures(bbox, {
-        signal: context.signal,
-        limit: 10_000,
-        includeRoads: true,
-        requestId: context.requestId,
-      })
-      .catch(() => undefined);
+    return provider.getFeatures(bbox, queryOptions).catch(() => undefined);
   }
 }
 
@@ -342,6 +363,14 @@ interface GenerationBudget {
 interface RoutedCandidate {
   route: NormalisedRoute;
   anchor: AnchorCandidate;
+}
+
+/** 1 up to ~50 km, tapering to 0.4 for very long loops. */
+export function distanceScaleFactor(targetDistanceMetres: number): number {
+  if (targetDistanceMetres <= 50_000) return 1;
+  if (targetDistanceMetres <= 80_000) return 0.75;
+  if (targetDistanceMetres <= 120_000) return 0.55;
+  return 0.4;
 }
 
 function candidateError(candidate: RoutedCandidate, request: CircularRouteRequest): number {

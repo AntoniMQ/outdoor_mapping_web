@@ -10,7 +10,7 @@ import type {
   RouteWarningCode,
   WarningSeverity,
 } from '@/types/domain';
-import { padBoundingBox } from '@/lib/geo/geometry';
+import { downsample, padBoundingBox } from '@/lib/geo/geometry';
 import { travelModeOf } from '@/features/routing/profiles';
 import {
   accessBreakdown,
@@ -70,17 +70,24 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
     const coordinates = route.geometry.coordinates as Coordinate[];
     const jurisdiction = context.jurisdiction ?? inferJurisdiction(coordinates[0] ?? [0, 0]);
 
+    const provider = getRightsOfWayProvider();
+    const queryOptions = {
+      jurisdiction,
+      signal: context.signal,
+      limit: 6_000,
+      includeRoads: true,
+      requestId: context.requestId,
+    };
+
+    // Corridor queries stay small however long the route is; the bounding-box
+    // path is only a fallback for providers that cannot do them.
     const features =
       context.features ??
-      (await getRightsOfWayProvider()
-        .getFeatures(padBoundingBox(route.bbox, 150), {
-          jurisdiction,
-          signal: context.signal,
-          limit: 6_000,
-          includeRoads: true,
-          requestId: context.requestId,
-        })
-        .catch(() => ({ type: 'FeatureCollection' as const, features: [] })));
+      (await (
+        provider.getFeaturesAlongRoutes
+          ? provider.getFeaturesAlongRoutes([downsample(coordinates, 300)], queryOptions)
+          : provider.getFeatures(padBoundingBox(route.bbox, 150), queryOptions)
+      ).catch(() => ({ type: 'FeatureCollection' as const, features: [] })));
 
     const { segments, debug, matchedDistanceMetres } = matchRouteToRightsOfWay(route, features, {
       jurisdiction,

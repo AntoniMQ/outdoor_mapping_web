@@ -54,6 +54,16 @@ vector tiles from the same table, e.g. with `ST_AsMVT` behind a `/api/tiles/{z}/
 `tippecanoe`, and point the overlay layers at the tile source instead of the GeoJSON source. The classification should
 be computed at tile-build time and stored as feature properties so styling stays identical.
 
+## Corridor queries
+
+Route analysis does not ask for a bounding box. It asks for everything within ~35 m of the route itself
+(`buildOverpassCorridorQuery`, or `ST_DWithin` for the PostGIS provider). This matters at length: a 100 km loop has a
+roughly 900 km² bounding box but only a few km² of corridor, so analysis cost scales with route length rather than
+with the square of it. The circular generator issues one corridor query covering every candidate.
+
+The map overlay still uses bounding boxes, because it genuinely needs everything in view — and it omits ordinary
+roads, which analysis includes.
+
 ## Caching and licensing
 
 Cached upstream responses are stored in `provider_cache` with a TTL. Anything derived from OpenStreetMap remains

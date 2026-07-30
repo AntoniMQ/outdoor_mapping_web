@@ -1,5 +1,10 @@
-import type { BoundingBox, RightsOfWayCollection, RightsOfWayFeature } from '@/types/domain';
-import { boundingBoxAreaSqKm } from '@/lib/geo/geometry';
+import type {
+  BoundingBox,
+  Coordinate,
+  RightsOfWayCollection,
+  RightsOfWayFeature,
+} from '@/types/domain';
+import { boundingBoxAreaSqKm, boundingBoxOf, padBoundingBox } from '@/lib/geo/geometry';
 import { classifyPath } from '@/features/rights-of-way/access-policy';
 import { edgesInBoundingBox } from '@/server/providers/fixtures/network';
 import type { RightsOfWayProvider, RightsOfWayQueryOptions } from '@/server/providers/osm/types';
@@ -12,6 +17,16 @@ import type { RightsOfWayProvider, RightsOfWayQueryOptions } from '@/server/prov
 export class FixtureRightsOfWayProvider implements RightsOfWayProvider {
   readonly name = 'fixture';
   readonly isSynthetic = true;
+
+  /** The synthetic network is generated on demand, so a padded bbox is cheap. */
+  async getFeaturesAlongRoutes(
+    routes: ReadonlyArray<ReadonlyArray<readonly [number, number]>>,
+    options: RightsOfWayQueryOptions = {},
+  ): Promise<RightsOfWayCollection> {
+    const coordinates = routes.flat() as Coordinate[];
+    if (coordinates.length === 0) return { type: 'FeatureCollection', features: [] };
+    return this.getFeatures(padBoundingBox(boundingBoxOf(coordinates), 100), options);
+  }
 
   async getFeatures(
     bbox: BoundingBox,

@@ -67,6 +67,33 @@ export function buildOverpassQuery(
   ].join('\n');
 }
 
+/**
+ * Corridor query: everything within `radiusMetres` of the supplied polyline.
+ *
+ * For route analysis this is strictly better than a bounding box — a 100 km
+ * loop has a ~900 km² bbox but only a few km² of corridor, so the query stays
+ * small no matter how long the route is.
+ */
+export function buildOverpassCorridorQuery(
+  coordinates: ReadonlyArray<readonly [number, number]>,
+  radiusMetres = 30,
+  timeoutSeconds = 25,
+  options: { includeRoads?: boolean } = {},
+): string {
+  const points = coordinates.map(([lon, lat]) => `${lat.toFixed(5)},${lon.toFixed(5)}`).join(',');
+  const around = `(around:${Math.round(radiusMetres)},${points})`;
+  return [
+    `[out:json][timeout:${timeoutSeconds}];`,
+    '(',
+    `  way["highway"]${around};`,
+    ');',
+    'out tags geom;',
+    // `options` is accepted for symmetry with buildOverpassQuery; a corridor is
+    // already tight enough that filtering by highway type saves little.
+    ...(options.includeRoads === false ? [] : []),
+  ].join('\n');
+}
+
 interface OverpassWay {
   type: string;
   id: number;
