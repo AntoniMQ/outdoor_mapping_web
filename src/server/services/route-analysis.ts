@@ -76,7 +76,8 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
         .getFeatures(padBoundingBox(route.bbox, 150), {
           jurisdiction,
           signal: context.signal,
-          limit: 4_000,
+          limit: 6_000,
+          includeRoads: true,
           requestId: context.requestId,
         })
         .catch(() => ({ type: 'FeatureCollection' as const, features: [] })));
@@ -98,7 +99,7 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
     const coverage = coverageBreakdown(segments);
     const repeated = repeatedFraction(coordinates);
 
-    const elevationKnown = route.ascentMetres !== undefined;
+    const hasElevationData = route.ascentMetres !== undefined;
     const duration =
       route.durationSeconds ?? distance / activityDefinition(context.activityProfile).baseSpeedMps;
 
@@ -123,6 +124,7 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
       durationSeconds: duration,
       ascentMetres: route.ascentMetres ?? 0,
       descentMetres: route.descentMetres ?? 0,
+      hasElevationData,
       highestPointMetres: undefined,
       lowestPointMetres: undefined,
       surface,
@@ -133,7 +135,7 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
       warnings,
       jurisdiction,
       matchedDistanceMetres,
-      isSyntheticData: route.isSyntheticData || !elevationKnown ? route.isSyntheticData : false,
+      isSyntheticData: route.isSyntheticData,
       debug: { match: debug },
     };
   }

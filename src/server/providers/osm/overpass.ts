@@ -28,7 +28,9 @@ export class OverpassRightsOfWayProvider implements RightsOfWayProvider {
     bbox: BoundingBox,
     queryOptions: RightsOfWayQueryOptions = {},
   ): Promise<RightsOfWayCollection> {
-    const query = buildOverpassQuery(bbox, Math.floor(this.options.timeoutMs / 1000));
+    const query = buildOverpassQuery(bbox, Math.floor(this.options.timeoutMs / 1000), {
+      includeRoads: queryOptions.includeRoads,
+    });
     const url = this.options.endpoint;
     const response = await fetchJson<OverpassResponse>(url, {
       method: 'POST',

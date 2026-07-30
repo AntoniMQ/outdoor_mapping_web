@@ -53,6 +53,7 @@ const analysedRoute: AnalysedRoute = {
     durationSeconds: 7_200,
     ascentMetres: 420,
     descentMetres: 415,
+    hasElevationData: true,
     surface: { pavedPercent: 20, unpavedPercent: 60, unknownPercent: 20, offRoadPercent: 72 },
     designation: {
       publicFootpathPercent: 4,

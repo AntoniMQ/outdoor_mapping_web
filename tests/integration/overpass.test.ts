@@ -94,3 +94,37 @@ describe('Overpass conversion', () => {
     );
   });
 });
+
+describe('road inclusion for analysis', () => {
+  it('omits carriageways by default, so the overlay stays small', () => {
+    const query = buildOverpassQuery([-0.53, 51.64, -0.5, 51.67]);
+    expect(query).not.toContain('residential');
+  });
+
+  it('includes carriageways when analysis asks for them', () => {
+    const query = buildOverpassQuery([-0.53, 51.64, -0.5, 51.67], 25, { includeRoads: true });
+    expect(query).toContain('residential');
+    expect(query).toContain('secondary');
+    // Still bounded to the same box.
+    expect(query.match(/51\.64,-0\.53,51\.67,-0\.5/g)?.length).toBeGreaterThan(3);
+  });
+
+  it('classifies a residential road as confirmed cycling access', () => {
+    const collection = overpassToFeatureCollection({
+      elements: [
+        {
+          type: 'way',
+          id: 5,
+          tags: { highway: 'residential', surface: 'asphalt' },
+          geometry: [
+            { lat: 51.65, lon: -0.52 },
+            { lat: 51.652, lon: -0.515 },
+          ],
+        },
+      ],
+    });
+    const classification = collection.features[0]!.properties.classification;
+    expect(classification.cycling.cyclingStatus).toBe('confirmed');
+    expect(classification.surfaceClass).toBe('paved');
+  });
+});

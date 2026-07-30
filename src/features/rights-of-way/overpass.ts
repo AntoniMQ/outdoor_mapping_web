@@ -40,7 +40,11 @@ export const RETAINED_TAGS = [
  * Bounded Overpass QL query. Only ways that are plausibly rights of way or
  * off-road links are requested, and only within the supplied bounding box.
  */
-export function buildOverpassQuery(bbox: BoundingBox, timeoutSeconds = 25): string {
+export function buildOverpassQuery(
+  bbox: BoundingBox,
+  timeoutSeconds = 25,
+  options: { includeRoads?: boolean } = {},
+): string {
   const [minLon, minLat, maxLon, maxLat] = bbox.map((v) => Number(v.toFixed(6)));
   const box = `${minLat},${minLon},${maxLat},${maxLon}`;
   return [
@@ -49,6 +53,15 @@ export function buildOverpassQuery(bbox: BoundingBox, timeoutSeconds = 25): stri
     `  way["designation"~"^(public_footpath|public_bridleway|restricted_byway|byway_open_to_all_traffic)$"](${box});`,
     `  way["highway"~"^(path|footway|bridleway|track|cycleway)$"](${box});`,
     `  way["highway"]["access"~"^(permissive|private|no)$"](${box});`,
+    // Carriageways are only requested for route analysis: without them every
+    // road section of a route is unmatched and reported as "uncertain access",
+    // which is both wrong and alarming. The map overlay omits them to keep
+    // payloads small.
+    ...(options.includeRoads
+      ? [
+          `  way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|road)$"](${box});`,
+        ]
+      : []),
     ');',
     'out tags geom;',
   ].join('\n');

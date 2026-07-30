@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { LineString } from 'geojson';
 import type { Coordinate, ElevationProfile } from '@/types/domain';
 import { downsample } from '@/lib/geo/geometry';
+import { ApiError } from '@/lib/http/api-error';
 import { fetchJson } from '@/lib/http/fetch-json';
 import { buildProfile } from '@/server/providers/elevation/profile';
 import type { ElevationProvider } from '@/server/providers/elevation/types';
@@ -41,6 +42,11 @@ export class OpenMeteoElevationProvider implements ElevationProvider {
       const parsed = schema.safeParse(payload);
       if (!parsed.success) break;
       elevations.push(...parsed.data.elevation);
+    }
+
+    if (elevations.length === 0) {
+      // Better to report elevation as unavailable than to invent a flat route.
+      throw new ApiError('UPSTREAM_INVALID_RESPONSE', 'The elevation provider returned no data.');
     }
 
     return buildProfile(coordinates, elevations, this.name, false);

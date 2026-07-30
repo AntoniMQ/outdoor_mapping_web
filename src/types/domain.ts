@@ -252,6 +252,8 @@ export interface RouteAnalysis {
   durationSeconds: number;
   ascentMetres: number;
   descentMetres: number;
+  /** False when no elevation source answered — ascent/descent are then unknown, not zero. */
+  hasElevationData: boolean;
   highestPointMetres?: number;
   lowestPointMetres?: number;
   surface: SurfaceBreakdown;

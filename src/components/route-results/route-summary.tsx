@@ -21,8 +21,16 @@ export function RouteSummary({
         <StatGrid
           items={[
             { label: 'Distance', value: formatDistance(analysis.distanceMetres, unit) },
-            { label: 'Ascent', value: formatElevation(analysis.ascentMetres) },
-            { label: 'Descent', value: formatElevation(analysis.descentMetres) },
+            {
+              label: 'Ascent',
+              value: formatElevation(analysis.hasElevationData ? analysis.ascentMetres : undefined),
+            },
+            {
+              label: 'Descent',
+              value: formatElevation(
+                analysis.hasElevationData ? analysis.descentMetres : undefined,
+              ),
+            },
             { label: 'Estimated time', value: formatDuration(analysis.durationSeconds) },
             { label: 'Off-road', value: formatPercent(analysis.surface.offRoadPercent) },
             { label: 'Repeated', value: formatPercent(analysis.repeatedPercent) },
@@ -30,6 +38,9 @@ export function RouteSummary({
         />
         <p className="mt-2 text-xs text-[var(--color-ink-muted)]">
           Percentages are weighted by distance. Estimated time assumes steady progress and no stops.
+          {analysis.hasElevationData
+            ? ''
+            : ' The elevation provider did not respond, so ascent and descent are unknown rather than zero.'}
         </p>
       </Panel>
 

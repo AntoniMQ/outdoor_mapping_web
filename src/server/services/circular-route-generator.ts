@@ -1,5 +1,6 @@
 import type {
   RightsOfWayCollection,
+  RouteWarningCode,
   AnalysedRoute,
   CandidateLabelKey,
   CircularRouteRequest,
@@ -146,21 +147,18 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
       },
     );
 
-    const scored: CircularRouteCandidate[] = [];
+    const passed: CircularRouteCandidate[] = [];
+    const rejected: Array<{ candidate: CircularRouteCandidate; reason: RejectionReason }> = [];
+    const rejectionCounts = new Map<RejectionReason, number>();
+
     for (const result of analysed) {
       if (result.status !== 'fulfilled') continue;
       const { route, anchor, analysis } = result.value;
-      const rejection = rejectionReason(route, analysis, request);
-      if (rejection) {
-        logger.debug('Circular candidate rejected', { reason: rejection, candidate: anchor.id });
-        continue;
-      }
       const components = scoreCandidate(route, analysis, request);
-      const score = totalScore(components);
-      scored.push({
+      const candidate: CircularRouteCandidate = {
         route,
         analysis,
-        score,
+        score: totalScore(components),
         scoreComponents: components,
         rationale: buildRationale({
           components,
@@ -169,18 +167,57 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
         }),
         pattern: anchor.pattern,
         direction: anchor.direction,
-      });
+      };
+
+      const reason = rejectionReason(route, analysis, request);
+      if (reason) {
+        rejectionCounts.set(reason, (rejectionCounts.get(reason) ?? 0) + 1);
+        rejected.push({ candidate, reason });
+        continue;
+      }
+      passed.push(candidate);
     }
 
-    if (scored.length === 0) {
+    if (passed.length > 0) {
+      passed.sort((a, b) => b.score - a.score);
+      return selectAlternatives(passed);
+    }
+
+    // Nothing cleared every constraint. Returning the closest attempts with an
+    // explicit warning is far more useful than refusing to answer — the user
+    // can see what was wrong and adjust.
+    if (rejected.length === 0) {
       throw new ApiError(
-        'NO_ROUTE_FOUND',
-        'Candidate loops were generated but none met the selected access and distance constraints. Try relaxing the access policy or changing the distance.',
+        budget.rateLimited ? 'RATE_LIMITED' : 'NO_ROUTE_FOUND',
+        'No usable circular route could be built from this start point.',
       );
     }
 
-    scored.sort((a, b) => b.score - a.score);
-    return selectAlternatives(scored);
+    logger.warn('All circular candidates were rejected; returning best-effort routes', {
+      requestId: context.requestId,
+      rejections: Object.fromEntries(rejectionCounts),
+    });
+
+    rejected.sort((a, b) => b.candidate.score - a.candidate.score);
+    const salvaged = rejected.slice(0, 6).map(({ candidate, reason }) => ({
+      ...candidate,
+      rationale: [`Below your constraints: ${REJECTION_TEXT[reason]}.`, ...candidate.rationale],
+      analysis: {
+        ...candidate.analysis,
+        warnings: [
+          {
+            code: REJECTION_WARNING[reason],
+            severity: 'caution' as const,
+            message: `No loop met every constraint. This option ${REJECTION_TEXT[reason]}. Try a different target distance, loop shape, or a less strict access policy.`,
+            affectedDistanceMetres: candidate.analysis.distanceMetres,
+            segmentIndexes: [],
+          },
+          ...candidate.analysis.warnings,
+        ],
+      },
+    }));
+
+    return selectAlternatives(salvaged);
   }
 
   private timeRemaining(budget: GenerationBudget): number {
@@ -287,7 +324,8 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
     return getRightsOfWayProvider()
       .getFeatures(bbox, {
         signal: context.signal,
-        limit: 8_000,
+        limit: 10_000,
+        includeRoads: true,
         requestId: context.requestId,
       })
       .catch(() => undefined);
@@ -313,11 +351,38 @@ function candidateError(candidate: RoutedCandidate, request: CircularRouteReques
   );
 }
 
+type RejectionReason =
+  | 'distance-mismatch'
+  | 'prohibited-access'
+  | 'footpath-only-section-under-strict-policy'
+  | 'excessive-repeated-geometry'
+  | 'insufficient-access-data'
+  | 'loop-not-closed';
+
+const REJECTION_TEXT: Record<RejectionReason, string> = {
+  'distance-mismatch': 'is well outside your target distance',
+  'prohibited-access': 'crosses ways mapped as private or prohibited',
+  'footpath-only-section-under-strict-policy':
+    'uses paths where cycling is not confirmed, which your strict access policy excludes',
+  'excessive-repeated-geometry': 'retraces too much of itself',
+  'insufficient-access-data': 'runs mostly over paths with no mapped access information',
+  'loop-not-closed': 'does not return cleanly to the start',
+};
+
+const REJECTION_WARNING: Record<RejectionReason, RouteWarningCode> = {
+  'distance-mismatch': 'DISTANCE_MISMATCH',
+  'prohibited-access': 'PRIVATE_ACCESS',
+  'footpath-only-section-under-strict-policy': 'PUBLIC_FOOTPATH_CYCLING_UNCONFIRMED',
+  'excessive-repeated-geometry': 'DISTANCE_MISMATCH',
+  'insufficient-access-data': 'LOW_DATA_COVERAGE',
+  'loop-not-closed': 'DISTANCE_MISMATCH',
+};
+
 function rejectionReason(
   route: NormalisedRoute,
   analysis: RouteAnalysisResult,
   request: CircularRouteRequest,
-): string | null {
+): RejectionReason | null {
   const error =
     Math.abs(route.distanceMetres - request.targetDistanceMetres) / request.targetDistanceMetres;
   if (error > ACCEPTABLE_TOLERANCE * 1.75) return 'distance-mismatch';

@@ -54,7 +54,9 @@ export function RouteCard({
         </div>
         <div>
           <dt className="text-[var(--color-ink-muted)]">Ascent</dt>
-          <dd className="font-semibold">{formatElevation(analysis.ascentMetres)}</dd>
+          <dd className="font-semibold">
+            {formatElevation(analysis.hasElevationData ? analysis.ascentMetres : undefined)}
+          </dd>
         </div>
         <div>
           <dt className="text-[var(--color-ink-muted)]">Time</dt>
