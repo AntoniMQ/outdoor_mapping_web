@@ -122,6 +122,7 @@ export async function POST(request: Request) {
 
         return {
           id: route.id,
+          diagnostics: analysis.debug.diagnostics,
           analysis: {
             ...analysis,
             highestPointMetres: elevation?.maxElevationMetres,

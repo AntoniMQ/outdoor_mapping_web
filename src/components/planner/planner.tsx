@@ -233,7 +233,12 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
             activityProfile: store.activityProfile,
             accessPolicy: store.accessPolicy,
           });
-          const analysed = { ...item, analysis: response.analysis, elevation: response.elevation };
+          const analysed = {
+            ...item,
+            analysis: response.analysis,
+            elevation: response.elevation,
+            diagnostics: response.diagnostics,
+          };
           // The generation-time rationale predates any path data; replace it.
           return {
             ...analysed,
@@ -276,7 +281,12 @@ export function Planner({ fixtureMode }: { fixtureMode: boolean }) {
         const analysed = routes.map((item) => {
           const result = byId.get(item.route.id);
           if (!result) return item;
-          const merged = { ...item, analysis: result.analysis, elevation: result.elevation };
+          const merged = {
+            ...item,
+            analysis: result.analysis,
+            elevation: result.elevation,
+            diagnostics: result.diagnostics,
+          };
           return { ...merged, rationale: describeRoute(merged, target) };
         });
         usePlannerStore.getState().setResults(labelAlternatives(analysed));

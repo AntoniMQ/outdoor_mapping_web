@@ -436,3 +436,42 @@ describe('POST /api/routes/analyse-batch', () => {
     expect(response.status).toBe(422);
   });
 });
+
+describe('analysis diagnostics', () => {
+  it('reports how much path data was found and how much of it matched', async () => {
+    const generated = (await (
+      await circular(
+        post('http://test/api/routes/circular', {
+          start: START,
+          targetDistanceMetres: 12_000,
+          activityProfile: 'mtb',
+          accessPolicy: 'permit-uncertain',
+          deferAnalysis: true,
+        }),
+      )
+    ).json()) as { routes: AnalysedRoute[] };
+
+    const response = await analyseBatch(
+      post('http://test/api/routes/analyse-batch', {
+        routes: [{ id: 'a', geometry: generated.routes[0]!.route.geometry }],
+        activityProfile: 'mtb',
+      }),
+    );
+
+    const body = (await response.json()) as {
+      results: Array<{
+        diagnostics: {
+          featureCount: number;
+          segmentCount: number;
+          matchedSegmentCount: number;
+          provider: string;
+        };
+      }>;
+    };
+    const diagnostics = body.results[0]!.diagnostics;
+    expect(diagnostics.featureCount).toBeGreaterThan(0);
+    expect(diagnostics.segmentCount).toBeGreaterThan(0);
+    expect(diagnostics.matchedSegmentCount).toBeGreaterThan(0);
+    expect(diagnostics.provider).toBe('fixture');
+  });
+});

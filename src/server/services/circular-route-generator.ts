@@ -447,7 +447,16 @@ function unanalysedResult(
     ),
     matchedDistanceMetres: 0,
     isSyntheticData: route.isSyntheticData,
-    debug: { match: [] },
+    debug: {
+      match: [],
+      diagnostics: {
+        featureCount: 0,
+        segmentCount: route.segments.length,
+        matchedSegmentCount: 0,
+        matchSources: {},
+        provider: 'skipped',
+      },
+    },
   };
 }
 

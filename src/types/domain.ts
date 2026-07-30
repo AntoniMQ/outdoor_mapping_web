@@ -273,9 +273,18 @@ export interface RouteAnalysis {
   isSyntheticData: boolean;
 }
 
+export interface RouteAnalysisDiagnostics {
+  featureCount: number;
+  segmentCount: number;
+  matchedSegmentCount: number;
+  matchSources: Record<string, number>;
+  provider: string;
+}
+
 export interface AnalysedRoute {
   route: NormalisedRoute;
   analysis: RouteAnalysis;
+  diagnostics?: RouteAnalysisDiagnostics;
   elevation?: ElevationProfile;
   label?: string;
   labelKey?: CandidateLabelKey;

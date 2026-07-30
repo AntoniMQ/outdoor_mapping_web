@@ -126,6 +126,7 @@ export async function POST(request: Request) {
     });
 
     const payload = {
+      diagnostics: analysis.debug.diagnostics,
       analysis: {
         ...analysis,
         highestPointMetres: elevation?.maxElevationMetres,

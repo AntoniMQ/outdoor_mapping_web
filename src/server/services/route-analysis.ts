@@ -11,6 +11,7 @@ import type {
   WarningSeverity,
 } from '@/types/domain';
 import { downsample, padBoundingBox } from '@/lib/geo/geometry';
+import { logger } from '@/lib/logging/logger';
 import { travelModeOf } from '@/features/routing/profiles';
 import {
   accessBreakdown,
@@ -42,8 +43,21 @@ export interface RouteAnalysisContext {
   features?: RightsOfWayCollection;
 }
 
+export interface AnalysisDiagnostics {
+  /** Ways returned by the rights-of-way provider near this route. */
+  featureCount: number;
+  /** Sections the route was split into for analysis. */
+  segmentCount: number;
+  /** Sections that were successfully attributed to a mapped way. */
+  matchedSegmentCount: number;
+  /** How those matches were made. */
+  matchSources: Record<string, number>;
+  /** Provider that answered, so a fixture answer is never mistaken for live data. */
+  provider: string;
+}
+
 export interface RouteAnalysisResult extends RouteAnalysis {
-  debug: { match: MatchDebugEntry[] };
+  debug: { match: MatchDebugEntry[]; diagnostics: AnalysisDiagnostics };
 }
 
 export interface RouteAnalysisService {
@@ -138,6 +152,22 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
         : []),
     ];
 
+    const matchSources: Record<string, number> = {};
+    for (const segment of segments) {
+      matchSources[segment.matchSource] = (matchSources[segment.matchSource] ?? 0) + 1;
+    }
+    const diagnostics: AnalysisDiagnostics = {
+      featureCount: features.features.length,
+      segmentCount: segments.length,
+      matchedSegmentCount: segments.filter((segment) => segment.matchSource !== 'unmatched').length,
+      matchSources,
+      provider: provider.name,
+    };
+
+    if (diagnostics.matchedSegmentCount === 0) {
+      logger.warn('Route matched no mapped ways', { requestId: context.requestId, ...diagnostics });
+    }
+
     return {
       distanceMetres: distance,
       durationSeconds: duration,
@@ -159,7 +189,7 @@ export class DefaultRouteAnalysisService implements RouteAnalysisService {
       jurisdiction,
       matchedDistanceMetres,
       isSyntheticData: route.isSyntheticData,
-      debug: { match: debug },
+      debug: { match: debug, diagnostics },
     };
   }
 }

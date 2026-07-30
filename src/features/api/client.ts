@@ -71,9 +71,18 @@ export function planRoute(
   });
 }
 
+export interface AnalysisDiagnostics {
+  featureCount: number;
+  segmentCount: number;
+  matchedSegmentCount: number;
+  matchSources: Record<string, number>;
+  provider: string;
+}
+
 export interface AnalyseResponse {
   analysis: RouteAnalysis;
   elevation?: ElevationProfile;
+  diagnostics?: AnalysisDiagnostics;
   isSyntheticData: boolean;
 }
 
@@ -104,7 +113,12 @@ export type RightsOfWayResponse = RightsOfWayCollection & {
 };
 
 export interface AnalyseBatchResponse {
-  results: Array<{ id: string; analysis: RouteAnalysis; elevation?: ElevationProfile }>;
+  results: Array<{
+    id: string;
+    analysis: RouteAnalysis;
+    elevation?: ElevationProfile;
+    diagnostics?: AnalysisDiagnostics;
+  }>;
   isSyntheticData: boolean;
 }
 

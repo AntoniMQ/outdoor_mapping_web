@@ -119,6 +119,21 @@ export function RouteSummary({
         </Panel>
       ) : null}
 
+      {result.diagnostics ? (
+        <Panel title="Path-data match">
+          <p className="text-xs text-[var(--color-ink-muted)]" data-testid="match-diagnostics">
+            {result.diagnostics.featureCount} mapped way(s) found near this route;{' '}
+            {result.diagnostics.matchedSegmentCount} of {result.diagnostics.segmentCount} sections
+            matched (source: {result.diagnostics.provider}).
+            {result.diagnostics.featureCount === 0
+              ? ' No path data came back, so nothing could be classified — usually an upstream timeout.'
+              : result.diagnostics.matchedSegmentCount === 0
+                ? ' Path data arrived but none of it lined up with this route, which points at a matching problem rather than a data one.'
+                : ''}
+          </p>
+        </Panel>
+      ) : null}
+
       <Panel title="Warnings">
         <WarningList warnings={analysis.warnings} />
       </Panel>
