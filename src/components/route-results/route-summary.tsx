@@ -50,6 +50,12 @@ export function RouteSummary({
       </Panel>
 
       <Panel title="Surface and designation">
+        {analysis.analysed && analysis.designation.otherPercent > 20 ? (
+          <p className="mb-2 text-xs text-[var(--color-ink-muted)]">
+            A large share of this route runs on ways with no mapped legal designation. They may well
+            be rideable — OpenStreetMap simply does not record their status here.
+          </p>
+        ) : null}
         <StatGrid
           items={[
             { label: 'Paved', value: pct(analysis.surface.pavedPercent) },
@@ -73,6 +79,11 @@ export function RouteSummary({
             },
             { label: 'Permissive', value: pct(analysis.designation.permissivePercent) },
             { label: 'Road', value: pct(analysis.designation.roadPercent) },
+            {
+              label: 'Track / no designation',
+              value: pct(analysis.designation.otherPercent),
+              hint: 'Off-road ways with no mapped legal designation — tracks and paths whose status OpenStreetMap does not record.',
+            },
           ]}
         />
       </Panel>
