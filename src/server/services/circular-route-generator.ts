@@ -53,8 +53,10 @@ export interface CircularRouteGenerator {
   ): Promise<CircularRouteCandidate[]>;
 }
 
-const MAX_CONVERGENCE_ITERATIONS = 2;
 const PREFERRED_TOLERANCE = 0.1;
+/** Candidates refined in phase two, and candidates analysed at all. */
+const REFINEMENT_LIMIT = 8;
+const ANALYSIS_LIMIT = 10;
 const ACCEPTABLE_TOLERANCE = 0.2;
 
 export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
@@ -63,19 +65,22 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
     context: RoutingContext,
   ): Promise<CircularRouteCandidate[]> {
     const candidateCount = context.candidateCount ?? 24;
+    const deadlineAt = context.deadlineAt ?? Date.now() + 40_000;
     const anchors = generateAnchorCandidates(request, candidateCount);
     const analysisService = getRouteAnalysisService();
 
-    // Shared budget: once an upstream provider rate-limits us, generating more
-    // candidates only makes it worse, so remaining candidates are abandoned and
-    // we rank whatever came back.
-    const budget: GenerationBudget = { rateLimited: false, failures: 0 };
+    // Shared state: once an upstream provider rate-limits us, generating more
+    // candidates only makes it worse, so the rest are abandoned.
+    const budget: GenerationBudget = { rateLimited: false, failures: 0, deadlineAt };
 
-    const routed = await mapWithConcurrency(anchors, context.concurrency, (anchor, index) =>
-      this.routeWithConvergence(request, anchor, index, context, budget),
+    // Phase 1 — one routing call per candidate. Cheap, and enough to rank by
+    // distance fit. Anything more would multiply upstream calls for candidates
+    // that are about to be discarded anyway.
+    const firstPass = await mapWithConcurrency(anchors, context.concurrency, (anchor, index) =>
+      this.routeCandidate(request, anchor, index, context, budget, 0),
     );
 
-    const successes = routed
+    let successes = firstPass
       .filter(
         (result): result is PromiseFulfilledResult<RoutedCandidate | null> =>
           result.status === 'fulfilled',
@@ -92,8 +97,42 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
       );
     }
 
+    // Phase 2 — refine only the candidates worth refining: those closest to the
+    // target that are not yet within tolerance, and only while time remains.
+    const needsWork = successes
+      .filter((candidate) => candidateError(candidate, request) > PREFERRED_TOLERANCE)
+      .sort((a, b) => candidateError(a, request) - candidateError(b, request))
+      .slice(0, REFINEMENT_LIMIT);
+
+    if (needsWork.length > 0 && this.timeRemaining(budget) > 0) {
+      const refined = await mapWithConcurrency(needsWork, context.concurrency, (candidate) =>
+        this.refineCandidate(request, candidate, context, budget),
+      );
+      refined.forEach((result, index) => {
+        if (result.status !== 'fulfilled' || !result.value) return;
+        const original = needsWork[index]!;
+        if (candidateError(result.value, request) < candidateError(original, request)) {
+          successes = successes.map((candidate) =>
+            candidate === original ? result.value! : candidate,
+          );
+        }
+      });
+    }
+
+    // Deduplicate on geometry before analysis: analysis is the expensive step,
+    // so there is no sense analysing two copies of the same loop.
+    const distinct = dedupeRoutes(
+      successes.map((item) => ({ ...item, route: item.route })),
+      0.62,
+    ).kept.slice(0, ANALYSIS_LIMIT);
+
+    // One rights-of-way query for the whole candidate set, rather than one per
+    // candidate. With live Overpass data this is the difference between a
+    // dozen upstream queries and one.
+    const sharedFeatures = await this.loadSharedFeatures(distinct, context);
+
     const analysed = await mapWithConcurrency(
-      successes,
+      distinct,
       Math.max(2, context.concurrency),
       async (item) => {
         const analysis = await analysisService.analyse(item.route, {
@@ -101,6 +140,7 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
           accessPolicy: request.accessPolicy,
           signal: context.signal,
           requestId: context.requestId,
+          features: sharedFeatures,
         });
         return { ...item, analysis };
       },
@@ -140,8 +180,89 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
     }
 
     scored.sort((a, b) => b.score - a.score);
-    const unique = dedupeRoutes(scored, 0.62).kept;
-    return selectAlternatives(unique.length >= 3 ? unique : scored);
+    return selectAlternatives(scored);
+  }
+
+  private timeRemaining(budget: GenerationBudget): number {
+    return budget.deadlineAt - Date.now();
+  }
+
+  /** Routes one candidate, optionally iterating to converge on the target distance. */
+  private async routeCandidate(
+    request: CircularRouteRequest,
+    initialAnchor: AnchorCandidate,
+    index: number,
+    context: RoutingContext,
+    budget: GenerationBudget,
+    extraIterations: number,
+  ): Promise<RoutedCandidate | null> {
+    const provider = getRoutingProvider();
+    let anchor = initialAnchor;
+    let best: RoutedCandidate | null = null;
+
+    for (let iteration = 0; iteration <= extraIterations; iteration += 1) {
+      if (context.signal?.aborted || budget.rateLimited) return best;
+      // Stop cleanly before the platform kills the request.
+      if (this.timeRemaining(budget) <= 0) {
+        budget.timedOut = true;
+        return best;
+      }
+
+      let result;
+      try {
+        result = await provider.route({
+          coordinates: [request.start, ...anchor.anchors, request.start],
+          preferences: request,
+          variantSeed: index + iteration * 101 + 1,
+          signal: context.signal,
+          requestId: context.requestId,
+        });
+      } catch (error) {
+        budget.failures += 1;
+        if (error instanceof ApiError && error.code === 'RATE_LIMITED') {
+          budget.rateLimited = true;
+          logger.warn('Routing provider rate-limited candidate generation', {
+            candidate: anchor.id,
+          });
+        } else {
+          logger.debug('Circular candidate routing failed', {
+            candidate: anchor.id,
+            error: (error as Error).message,
+          });
+        }
+        return best;
+      }
+
+      const route = result.routes[0];
+      if (!route) return best;
+      const candidate: RoutedCandidate = { route, anchor };
+      if (!best || candidateError(candidate, request) < candidateError(best, request))
+        best = candidate;
+      if (candidateError(candidate, request) <= PREFERRED_TOLERANCE) return candidate;
+      anchor = rescaleCandidate(
+        anchor,
+        request.start,
+        route.distanceMetres,
+        request.targetDistanceMetres,
+      );
+    }
+    return best;
+  }
+
+  /** One extra convergence attempt for a promising candidate. */
+  private async refineCandidate(
+    request: CircularRouteRequest,
+    candidate: RoutedCandidate,
+    context: RoutingContext,
+    budget: GenerationBudget,
+  ): Promise<RoutedCandidate | null> {
+    const rescaled = rescaleCandidate(
+      candidate.anchor,
+      request.start,
+      candidate.route.distanceMetres,
+      request.targetDistanceMetres,
+    );
+    return this.routeCandidate(request, rescaled, 991, context, budget, 0);
   }
 
   /** Union bounding box of every candidate, queried once. */
@@ -171,69 +292,13 @@ export class DefaultCircularRouteGenerator implements CircularRouteGenerator {
       })
       .catch(() => undefined);
   }
-
-  private async routeWithConvergence(
-    request: CircularRouteRequest,
-    initialAnchor: AnchorCandidate,
-    index: number,
-    context: RoutingContext,
-    budget: GenerationBudget,
-  ): Promise<RoutedCandidate | null> {
-    const provider = getRoutingProvider();
-    let anchor = initialAnchor;
-    let best: RoutedCandidate | null = null;
-
-    for (let iteration = 0; iteration <= MAX_CONVERGENCE_ITERATIONS; iteration += 1) {
-      if (context.signal?.aborted || budget.rateLimited) return best;
-      const coordinates: Coordinate[] = [request.start, ...anchor.anchors, request.start];
-      let result;
-      try {
-        result = await provider.route({
-          coordinates,
-          preferences: request,
-          variantSeed: index + iteration * 101 + 1,
-          signal: context.signal,
-          requestId: context.requestId,
-        });
-      } catch (error) {
-        budget.failures += 1;
-        if (error instanceof ApiError && error.code === 'RATE_LIMITED') {
-          budget.rateLimited = true;
-          logger.warn('Routing provider rate-limited candidate generation', {
-            candidate: anchor.id,
-            completed: index,
-          });
-        } else {
-          logger.debug('Circular candidate routing failed', {
-            candidate: anchor.id,
-            error: (error as Error).message,
-          });
-        }
-        return best;
-      }
-
-      const route = result.routes[0];
-      if (!route) return best;
-      const error =
-        Math.abs(route.distanceMetres - request.targetDistanceMetres) /
-        request.targetDistanceMetres;
-      const candidate: RoutedCandidate = { route, anchor };
-      if (!best || error < candidateError(best, request)) best = candidate;
-      if (error <= PREFERRED_TOLERANCE) return candidate;
-      anchor = rescaleCandidate(
-        anchor,
-        request.start,
-        route.distanceMetres,
-        request.targetDistanceMetres,
-      );
-    }
-    return best;
-  }
 }
 
 interface GenerationBudget {
   rateLimited: boolean;
   failures: number;
+  deadlineAt: number;
+  timedOut?: boolean;
 }
 
 interface RoutedCandidate {

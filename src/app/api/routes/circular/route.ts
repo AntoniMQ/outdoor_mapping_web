@@ -40,6 +40,7 @@ export async function POST(request: Request) {
         env.CIRCULAR_CANDIDATE_COUNT,
         provider.maxCandidateCount ?? Number.MAX_SAFE_INTEGER,
       ),
+      deadlineAt: Date.now() + env.ROUTE_GENERATION_BUDGET_MS,
     });
 
     const elevationProvider = getElevationProvider();

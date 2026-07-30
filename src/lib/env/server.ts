@@ -65,6 +65,12 @@ const serverSchema = z.object({
   ROUTE_CANDIDATE_CONCURRENCY: z.coerce.number().int().min(1).max(12).default(4),
   /** Lower this for rate-limited providers such as the openrouteservice free tier. */
   CIRCULAR_CANDIDATE_COUNT: z.coerce.number().int().min(6).max(48).default(24),
+  /**
+   * Wall-clock budget for circular generation. Generation returns the best
+   * candidates found so far when it expires, rather than exceeding the
+   * platform's function timeout and failing with a 504.
+   */
+  ROUTE_GENERATION_BUDGET_MS: z.coerce.number().int().min(5_000).max(120_000).default(40_000),
   CONTACT_EMAIL: z.string().default('trailloop@example.org'),
 });
 

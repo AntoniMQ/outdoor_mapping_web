@@ -43,6 +43,8 @@ export interface RoutingContext {
   concurrency: number;
   /** How many circular candidates to generate. Lower it for rate-limited providers. */
   candidateCount?: number;
+  /** Absolute time (ms since epoch) after which generation must stop and return. */
+  deadlineAt?: number;
 }
 
 export function requireCoordinates(coordinates: Coordinate[]): void {
